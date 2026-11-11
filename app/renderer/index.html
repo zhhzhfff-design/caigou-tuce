@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>商品采购图册</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <button class="iconbtn plus" id="btnAdd" title="添加商品 / 导入">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+      <path d="M12 5v14M5 12h14"></path>
+    </svg>
+  </button>
+  <div class="right">
+    <div class="vt" id="vt">
+      <button data-view="grid" class="on" title="图墙">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+          <rect x="3" y="3" width="7.5" height="7.5" rx="1.6"></rect><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"></rect>
+          <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"></rect><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"></rect>
+        </svg>
+      </button>
+      <button data-view="list" title="列表">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+          <path d="M4 6.5h16M4 12h16M4 17.5h16"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="search" id="searchWrap">
+      <svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.6-3.6"></path>
+      </svg>
+      <input id="q" type="text" placeholder="搜索" autocomplete="off" spellcheck="false">
+      <button class="clr" id="clrBtn" title="清空">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 6l12 12M18 6L6 18"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<nav class="cats">
+  <div class="pills" id="pills"></div>
+  <div class="zoomwrap" id="zoomWrap">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="3" y="4" width="6" height="6" rx="1"></rect><rect x="3" y="14" width="6" height="6" rx="1"></rect>
+      <path d="M13 7h8M13 17h8"></path>
+    </svg>
+    <input type="range" id="zoom" min="200" max="430" step="10" value="300">
+  </div>
+</nav>
+
+<main class="main" id="scroller">
+  <div class="count" id="count"></div>
+  <div class="grid" id="grid"></div>
+  <div class="loading" id="loading"><span class="spin"></span>加载中…</div>
+  <div id="sentinel"></div>
+  <div class="empty" id="empty" style="display:none"></div>
+</main>
+
+<!-- ============ 遮罩 ============ -->
+<div class="mask" id="mask"></div>
+
+<!-- ============ 导入面板 ============ -->
+<div class="panel" id="importPanel">
+  <div class="ph">
+    <h3>导入商品</h3>
+    <button class="x" data-close>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 6l12 12M18 6L6 18"></path>
+      </svg>
+    </button>
+  </div>
+  <div class="pb">
+    <div class="drop" id="drop">
+      <svg class="ic" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 16V4M12 4L7 9M12 4l5 5"></path>
+        <path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3"></path>
+      </svg>
+      <h4>把图片或表格直接拖到这里</h4>
+      <p>支持 JPG / PNG / WEBP / XLSX / CSV<br>也可以拖入整个文件夹</p>
+    </div>
+
+    <div class="optgrid">
+      <button class="opt" id="optFolder">
+        <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"></path>
+        </svg></span>
+        <span class="ol"><span class="ot">图片文件夹</span><span class="od">一次导入整个文件夹</span></span>
+      </button>
+      <button class="opt" id="optFiles">
+        <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+          <circle cx="8.5" cy="9.5" r="1.5"></circle><path d="M21 15l-5-5L5 20"></path>
+        </svg></span>
+        <span class="ol"><span class="ot">选择图片</span><span class="od">可多选，按文件名排序</span></span>
+      </button>
+      <button class="opt" id="optUrl">
+        <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1.5 1.5"></path>
+          <path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1.5-1.5"></path>
+        </svg></span>
+        <span class="ol"><span class="ot">粘贴图片链接</span><span class="od">从网页复制的图片地址</span></span>
+      </button>
+      <button class="opt" id="optTable">
+        <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+          <path d="M3 9h18M3 15h18M9 3v18"></path>
+        </svg></span>
+        <span class="ol"><span class="ot">导入表格</span><span class="od">Excel / CSV 批量补链接</span></span>
+      </button>
+      <button class="opt" id="optTpl">
+        <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"></path>
+          <path d="M14 3v5h5"></path>
+        </svg></span>
+        <span class="ol"><span class="ot">下载表格模板</span><span class="od">照格式填，不容易错</span></span>
+      </button>
+      <button class="opt" id="optExport">
+        <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M12 4v12M12 16l-4-4M12 16l4-4"></path>
+          <path d="M4 18v1a2 2 0 002 2h12a2 2 0 002-2v-1"></path>
+        </svg></span>
+        <span class="ol"><span class="ot">导出当前清单</span><span class="od">含所有链接，可备份</span></span>
+      </button>
+    </div>
+
+    <div class="hint">
+      <p><b>表格怎么填：</b>一行一个商品。第一列填<b>图片文件名</b>（比如 A001.jpg），程序会自动把图片和这一行对上；链接没填也能先导进来，之后在卡片上右键补。</p>
+    </div>
+
+    <div class="footrow">
+      <button class="linkbtn" id="optOpenDir">打开数据文件夹</button>
+      <span class="sep">·</span>
+      <button class="linkbtn danger" id="optClear">清空全部数据</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 粘贴链接面板 ============ -->
+<div class="panel" id="urlPanel" style="width:520px">
+  <div class="ph">
+    <h3>粘贴图片链接</h3>
+    <button class="x" data-close>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 6l12 12M18 6L6 18"></path>
+      </svg>
+    </button>
+  </div>
+  <div class="pb">
+    <div class="field">
+      <label>一行一个图片地址（http 开头）</label>
+      <textarea id="urlInput" style="min-height:180px;font-family:Consolas,monospace;font-size:12px"
+        placeholder="https://cbu01.alicdn.com/img/ibank/xxxx.jpg&#10;https://cbu01.alicdn.com/img/ibank/yyyy.jpg"></textarea>
+    </div>
+    <p style="font-size:11.5px;color:#5E5E5E;line-height:1.9">
+      在网页上右键商品图 → 复制图片地址 → 粘贴到这里。<br>
+      程序会自动下载到本地，断网也能看。
+    </p>
+  </div>
+  <div class="pf" style="padding:16px 24px 22px;display:flex;justify-content:flex-end;gap:10px">
+    <button class="btn" data-close>取消</button>
+    <button class="btn pri" id="urlGo">开始下载</button>
+  </div>
+</div>
+
+<!-- ============ 编辑抽屉 ============ -->
+<div class="panel drawer" id="editPanel">
+  <div class="ph">
+    <h3 id="edTitle">编辑商品</h3>
+    <button class="x" data-close>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 6l12 12M18 6L6 18"></path>
+      </svg>
+    </button>
+  </div>
+  <div class="pb">
+    <div class="field">
+      <label>商品图片</label>
+      <div class="imgbox" id="edImgBox"><span class="none">暂无图片</span></div>
+      <div class="imgrow">
+        <button class="btn" id="edPickImg" style="flex:1">换一张本地图片</button>
+        <button class="btn" id="edUrlImg" style="flex:1">用图片链接</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>商品名称</label>
+      <input id="edName" placeholder="例如：三合一数据线 1米 黑色">
+    </div>
+    <div class="field">
+      <label>货号</label>
+      <input id="edSku" placeholder="选填，方便搜索定位">
+    </div>
+    <div class="field">
+      <label>分类</label>
+      <input id="edCat" list="catOptions" placeholder="例如：数据线">
+      <datalist id="catOptions"></datalist>
+    </div>
+    <div class="field">
+      <label>采购链接</label>
+      <input id="edUrl" placeholder="https://detail.1688.com/offer/xxx.html">
+    </div>
+    <div class="field">
+      <label>备注</label>
+      <textarea id="edNote" placeholder="供应商、起订量、价格……"></textarea>
+    </div>
+  </div>
+  <div class="pf">
+    <button class="btn danger" id="edDel" style="margin-right:auto">删除</button>
+    <button class="btn" data-close>取消</button>
+    <button class="btn pri" id="edSave">保存</button>
+  </div>
+</div>
+
+<!-- ============ 右键菜单 ============ -->
+<div class="ctx" id="ctx">
+  <button data-act="open">打开采购链接</button>
+  <button data-act="edit">编辑</button>
+  <button data-act="copy">复制链接</button>
+  <hr>
+  <button data-act="del" class="danger">删除这件</button>
+</div>
+
+<!-- ============ 进度 ============ -->
+<div class="progress" id="progress">
+  <div class="bar" id="bar"></div>
+  <div class="txt" id="ptxt"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

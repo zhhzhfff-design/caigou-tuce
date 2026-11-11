@@ -1,0 +1,19 @@
+{
+  "name": "caigou-tuce",
+  "version": "1.0.0",
+  "description": "商品采购图册 — 点图即达的本地采购工具",
+  "main": "main.js",
+  "author": "张聪聪",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-packager . 采购图册 --platform=win32 --arch=x64 --out=dist --overwrite --asar --app-version=1.0.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.3.0"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

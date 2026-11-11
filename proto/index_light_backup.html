@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>采购图册 · 点图即达</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#1F3864;--navy2:#2b4a7d;--accent:#2563eb;
+  --line:#e5e8ee;--bg:#f4f6f9;--text:#1a2130;--sub:#69707e;--muted:#9aa3b2;
+  --card:#fff;--ok:#22a06b;--warn:#d8564a;
+  --thumb:190px;
+}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+  background:var(--bg);color:var(--text);font-size:14px;-webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;font-size:13px;cursor:pointer;border:none;background:none;color:inherit}
+input,select{font-family:inherit;font-size:13px;color:inherit}
+img{display:block}
+
+/* ============ 顶栏 ============ */
+.top{
+  height:62px;background:#fff;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:16px;padding:0 18px;position:relative;z-index:40;
+}
+.brand{display:flex;align-items:center;gap:10px;flex:none}
+.logo{
+  width:34px;height:34px;border-radius:9px;
+  background:linear-gradient(145deg,#3a5f96,#1F3864);
+  color:#fff;display:grid;place-items:center;font-size:15px;font-weight:700;
+  box-shadow:0 3px 10px rgba(31,56,100,.22);
+}
+.brand h1{font-size:15px;font-weight:700;letter-spacing:.3px;line-height:1.15}
+.brand p{font-size:11px;color:var(--muted);margin-top:3px}
+
+.search{flex:1;max-width:440px;position:relative}
+.search input{
+  width:100%;height:36px;border:1px solid var(--line);border-radius:8px;
+  padding:0 30px 0 34px;background:#f7f8fb;outline:none;transition:.16s;
+}
+.search input::placeholder{color:#a8b0be}
+.search input:focus{border-color:#b7c9e8;background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+.search .ico{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#a8b0be;pointer-events:none}
+.search .kbd{
+  position:absolute;right:9px;top:50%;transform:translateY(-50%);
+  font-size:10px;color:#b3bbc8;border:1px solid #e8ebf1;border-radius:4px;
+  padding:1px 5px;background:#fff;font-family:Consolas,monospace;
+}
+.search.filled .kbd{display:none}
+.search .clr{position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#a8b0be;display:none;padding:3px}
+.search.filled .clr{display:block}
+.search .clr:hover{color:#4a5364}
+
+.tools{margin-left:auto;display:flex;align-items:center;gap:12px}
+.seg{display:flex;background:#f1f3f7;border-radius:8px;padding:3px}
+.seg button{
+  height:28px;padding:0 12px;border-radius:6px;color:#5b6478;font-weight:500;
+  display:flex;align-items:center;gap:5px;transition:.14s;
+}
+.seg button.on{background:#fff;color:var(--navy);font-weight:600;box-shadow:0 1px 4px rgba(20,30,50,.12)}
+
+.zoomwrap{display:flex;align-items:center;gap:8px;padding:0 2px}
+.zoomwrap .lbl{font-size:11px;color:var(--muted);white-space:nowrap}
+input[type=range]{
+  width:96px;-webkit-appearance:none;background:transparent;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{height:4px;background:#e2e6ee;border-radius:2px}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;
+  border:2px solid var(--navy);margin-top:-5px;box-shadow:0 1px 3px rgba(0,0,0,.18);
+}
+
+.btn{
+  height:34px;padding:0 13px;border-radius:7px;border:1px solid var(--line);background:#fff;
+  color:#2b3444;display:inline-flex;align-items:center;gap:6px;transition:.15s;font-weight:500;white-space:nowrap;
+}
+.btn:hover{border-color:#c6d2e6;background:#f8fafd}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}
+.btn.primary:hover{background:var(--navy2)}
+
+/* ============ 布局 ============ */
+.body{display:flex;height:calc(100vh - 62px)}
+.side{
+  width:196px;flex:none;background:#fff;border-right:1px solid var(--line);
+  padding:14px 10px 16px;overflow-y:auto;display:flex;flex-direction:column;
+}
+.side::-webkit-scrollbar{width:6px}
+.side::-webkit-scrollbar-thumb{background:#e2e6ee;border-radius:3px}
+.side h2{font-size:10.5px;color:var(--muted);font-weight:700;letter-spacing:1.4px;padding:2px 9px 10px}
+.cat{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;
+  cursor:pointer;margin-bottom:2px;color:#3b4557;transition:.12s;font-size:13px;user-select:none;
+}
+.cat:hover{background:#f5f7fb}
+.cat.on{background:#eaf1fc;color:var(--navy);font-weight:600}
+.cat .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat .n{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.cat.on .n{color:var(--accent)}
+.side .foot{
+  margin-top:auto;padding:14px 10px 0;border-top:1px dashed var(--line);
+  font-size:11.5px;color:var(--muted);line-height:1.9;
+}
+.side .foot b{color:#414d63;font-weight:600}
+
+.main{flex:1;overflow-y:auto;padding:16px 20px 100px;position:relative;scroll-behavior:smooth}
+.main::-webkit-scrollbar{width:10px}
+.main::-webkit-scrollbar-thumb{background:#dfe4ec;border-radius:5px;border:2px solid var(--bg)}
+.main::-webkit-scrollbar-thumb:hover{background:#c8d0dd}
+
+.bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;min-height:26px}
+.bar .cnt{font-size:12.5px;color:var(--sub)}
+.bar .cnt b{color:var(--navy);font-weight:700;font-size:13.5px}
+.bar .sp{flex:1}
+.bar .hint{font-size:11.5px;color:var(--muted)}
+
+/* ============ 卡片网格 ============ */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(var(--thumb),1fr));
+  gap:14px;
+}
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+  cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s;
+  display:flex;flex-direction:column;position:relative;contain:content;
+}
+.card:hover{transform:translateY(-3px);box-shadow:0 10px 26px rgba(31,56,100,.14);border-color:#c3d2ea}
+.card:active{transform:translateY(-1px)}
+.thumb{
+  position:relative;aspect-ratio:1/1;background:#f0f2f6;overflow:hidden;
+}
+.thumb img{
+  width:100%;height:100%;object-fit:cover;transition:transform .35s ease;
+  background:#f0f2f6;
+}
+.card:hover .thumb img{transform:scale(1.045)}
+.thumb .ph{
+  position:absolute;inset:0;display:grid;place-items:center;color:#bcc4d1;
+  font-size:11.5px;text-align:center;padding:12px;line-height:1.7;
+}
+.noimg{position:absolute;left:8px;top:8px;background:rgba(216,86,74,.92);color:#fff;
+  font-size:10px;padding:2px 7px;border-radius:20px;letter-spacing:.3px}
+.nolink{position:absolute;right:8px;top:8px;background:rgba(120,128,142,.88);color:#fff;
+  font-size:10px;padding:2px 7px;border-radius:20px}
+.cover{
+  position:absolute;inset:0;background:linear-gradient(to top,rgba(20,32,54,.80),rgba(20,32,54,.12) 55%,transparent);
+  opacity:0;transition:opacity .18s;display:flex;align-items:flex-end;padding:10px;
+}
+.card:hover .cover{opacity:1}
+.cover span{
+  color:#fff;font-size:11.5px;font-weight:600;display:flex;align-items:center;gap:5px;
+  transform:translateY(6px);transition:transform .2s;
+}
+.card:hover .cover span{transform:none}
+
+.info{padding:9px 10px 11px;display:flex;flex-direction:column;gap:6px}
+.ttl{
+  font-size:12.5px;line-height:1.45;font-weight:600;color:#202a3c;min-height:36px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);min-width:0}
+.sku{font-family:Consolas,"Courier New",monospace;font-size:10.5px;color:#8b95a6;
+  background:#f4f6fa;border-radius:4px;padding:1px 5px;flex:none}
+.tag{
+  font-size:10.5px;padding:1px 7px;border-radius:20px;background:#eef3fc;color:#3b6bb8;
+  flex:none;white-space:nowrap;
+}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--ok);flex:none;margin-left:auto}
+.dot.off{background:#d3d8e2}
+
+/* ============ 列表模式 ============ */
+.list{padding:0}
+.lhead{
+  display:flex;align-items:center;gap:14px;padding:0 13px 8px;font-size:11px;
+  color:var(--muted);letter-spacing:.4px;border-bottom:1px solid var(--line);margin-bottom:8px;
+}
+.lhead .h1{width:44px;flex:none}
+.lhead .h2{flex:1}
+.lhead .h3{width:78px;flex:none}
+.lhead .h4{width:96px;flex:none;text-align:right}
+.lhead .h5{width:44px;flex:none}
+.row{
+  display:flex;align-items:center;gap:14px;padding:7px 12px;background:#fff;
+  border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer;transition:.13s;
+}
+.row:hover{border-color:#c3d2ea;box-shadow:0 3px 12px rgba(31,56,100,.10);transform:translateX(2px)}
+.row .rt{width:44px;height:44px;border-radius:6px;object-fit:cover;background:#f0f2f6;flex:none}
+.row .rn{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px}
+.row .rn .t{font-size:13px;font-weight:600;color:#1e2839;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .rn .s{font-size:11px;color:var(--muted);font-family:Consolas,monospace;flex:none}
+.row .rc{width:78px;font-size:11.5px;color:#6b7688;flex:none}
+.row .rl{width:96px;flex:none;font-size:11.5px;text-align:right}
+.row .rl.ok{color:var(--ok)}
+.row .rl.no{color:#b3bbc8}
+.row .go{opacity:0;transition:.15s;color:var(--accent);font-size:11.5px;flex:none;width:44px;text-align:right}
+.row:hover .go{opacity:1}
+
+/* ============ 空状态 ============ */
+.empty{padding:80px 20px;text-align:center;color:var(--sub)}
+.empty h3{font-size:15px;color:#3a4558;margin-bottom:8px}
+.empty p{font-size:12.5px;color:var(--muted);line-height:1.9}
+
+/* ============ 底部加载 ============ */
+#sentinel{height:1px}
+.loading{
+  text-align:center;padding:22px 0 8px;color:var(--muted);font-size:12px;display:none;
+}
+.loading.show{display:block}
+.loading .spin{
+  display:inline-block;width:13px;height:13px;border:2px solid #dfe4ec;border-top-color:var(--navy);
+  border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ============ Toast ============ */
+.toast{
+  position:fixed;left:50%;bottom:34px;transform:translate(-50%,16px);
+  background:#1b2230;color:#fff;padding:10px 20px;border-radius:9px;font-size:13px;
+  opacity:0;pointer-events:none;transition:.24s;z-index:200;max-width:70vw;
+  box-shadow:0 8px 26px rgba(0,0,0,.24);
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo">图</div>
+    <div>
+      <h1>采购图册</h1>
+      <p>点图即达 · 本地运行</p>
+    </div>
+  </div>
+
+  <div class="search" id="searchWrap">
+    <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path>
+    </svg>
+    <input id="q" type="text" placeholder="搜商品名 / 货号 / 备注…" autocomplete="off" spellcheck="false">
+    <span class="kbd">Ctrl K</span>
+    <button class="clr" id="clrBtn" title="清空">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M6 6l12 12M18 6L6 18"></path>
+      </svg>
+    </button>
+  </div>
+
+  <div class="tools">
+    <div class="seg" id="seg">
+      <button data-view="grid" class="on">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+        </svg>图墙
+      </button>
+      <button data-view="list">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>列表
+      </button>
+    </div>
+    <div class="zoomwrap" id="zoomWrap">
+      <span class="lbl">大小</span>
+      <input type="range" id="zoom" min="140" max="330" step="10" value="190">
+    </div>
+    <button class="btn primary" id="importBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M12 15V3M12 3L7.5 7.5M12 3l4.5 4.5"></path>
+        <path d="M4 15v3.5A2.5 2.5 0 006.5 21h11a2.5 2.5 0 002.5-2.5V15"></path>
+      </svg>导入
+    </button>
+  </div>
+</header>
+
+<div class="body">
+  <aside class="side">
+    <h2>分 类</h2>
+    <div id="catList"></div>
+    <div class="foot" id="foot"></div>
+  </aside>
+
+  <main class="main" id="scroller">
+    <div class="bar">
+      <span class="cnt" id="cnt">共 <b>0</b> 件</span>
+      <span class="sp"></span>
+      <span class="hint" id="hint"></span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="loading" id="loading"><span class="spin"></span>加载中…</div>
+    <div id="sentinel"></div>
+    <div class="empty" id="empty" style="display:none"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="data/items.js"></script>
+
+<script>
+"use strict";
+
+// ================= 状态 =================
+const PAGE = 60;
+const state = {
+  all: [],
+  view: [],
+  rendered: 0,
+  cat: "__all__",
+  kw: "",
+  mode: "grid",
+  thumb: 190,
+  loading: false
+};
+
+const $ = id => document.getElementById(id);
+const grid = $("grid"), scroller = $("scroller"), loadingEl = $("loading");
+const emptyEl = $("empty"), cntEl = $("cnt"), hintEl = $("hint"), sentinel = $("sentinel");
+
+// ================= 工具 =================
+let toastTimer = null;
+function toast(msg) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2000);
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+function imgSrc(it) {
+  return it.img ? "data/images/" + encodeURIComponent(it.img) : "";
+}
+
+// ================= 渲染 =================
+function cardHTML(it) {
+  const src = imgSrc(it);
+  const hasLink = !!(it.url && it.url.trim());
+  const hasImg = !!src;
+  return `<article class="card" data-id="${esc(it.id)}">
+    <div class="thumb">
+      ${hasImg
+        ? `<img src="${src}" alt="${esc(it.name)}" loading="lazy" decoding="async">`
+        : `<div class="ph">暂无图片<br><span style="font-size:10px;color:#cdd3de">${esc(it.img || "未命名")}</span></div>`}
+      ${hasLink ? "" : `<span class="nolink">无链接</span>`}
+      <div class="cover"><span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+          <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"></path>
+        </svg>
+        点击打开采购链接
+      </span></div>
+    </div>
+    <div class="info">
+      <div class="ttl">${esc(it.name || "未命名商品")}</div>
+      <div class="meta">
+        <span class="sku">${esc(it.sku || it.id)}</span>
+        <span class="tag">${esc(it.cat || "未分类")}</span>
+        <span class="dot ${hasLink ? "" : "off"}"></span>
+      </div>
+    </div>
+  </article>`;
+}
+
+function rowHTML(it) {
+  const src = imgSrc(it);
+  const hasLink = !!(it.url && it.url.trim());
+  return `<div class="row" data-id="${esc(it.id)}">
+    ${src
+      ? `<img class="rt" src="${src}" alt="" loading="lazy" decoding="async">`
+      : `<div class="rt"></div>`}
+    <div class="rn">
+      <span class="t">${esc(it.name || "未命名商品")}</span>
+      <span class="s">${esc(it.sku || it.id)}</span>
+    </div>
+    <div class="rc">${esc(it.cat || "未分类")}</div>
+    <div class="rl ${hasLink ? "ok" : "no"}">${hasLink ? "已关联" : "无链接"}</div>
+    <div class="go">打开 ↗</div>
+  </div>`;
+}
+
+const LIST_HEAD = `<div class="lhead">
+  <div class="h1"></div><div class="h2">商品名称 / 货号</div>
+  <div class="h3">分类</div><div class="h4">链接</div><div class="h5"></div>
+</div>`;
+
+function renderMore() {
+  if (state.rendered >= state.view.length) { loadingEl.classList.remove("show"); return; }
+  state.loading = true;
+  loadingEl.classList.add("show");
+
+  const slice = state.view.slice(state.rendered, state.rendered + PAGE);
+  const buf = document.createElement("div");
+  buf.innerHTML = state.mode === "grid" ? slice.map(cardHTML).join("") : slice.map(rowHTML).join("");
+
+  if (state.mode === "grid") {
+    const frag = document.createDocumentFragment();
+    while (buf.firstElementChild) frag.appendChild(buf.firstElementChild);
+    grid.appendChild(frag);
+  } else {
+    let listEl = grid.querySelector(".list");
+    if (!listEl) {
+      listEl = document.createElement("div");
+      listEl.className = "list";
+      listEl.innerHTML = LIST_HEAD;
+      grid.appendChild(listEl);
+    }
+    while (buf.firstElementChild) listEl.appendChild(buf.firstElementChild);
+  }
+
+  grid.style.display = state.mode === "grid" ? "grid" : "block";
+  state.rendered += slice.length;
+  state.loading = false;
+  loadingEl.classList.toggle("show", state.rendered < state.view.length);
+}
+
+function resetRender() {
+  grid.innerHTML = "";
+  grid.style.display = state.mode === "grid" ? "grid" : "block";
+  state.rendered = 0;
+  emptyEl.style.display = state.view.length ? "none" : "block";
+  if (!state.view.length) {
+    emptyEl.innerHTML = `<h3>${state.kw ? "没找到匹配的商品" : "这里还没有东西"}</h3>
+      <p>${state.kw ? "换个关键词试试，或者点左边的「全部分类」" : "点右上角「导入」，把图片和表格拖进来"}</p>`;
+  }
+  renderMore();
+  updateCount();
+}
+
+function updateCount() {
+  const total = state.view.length;
+  cntEl.innerHTML = `共 <b>${total}</b> 件${state.kw ? ` · 关键词「${esc(state.kw)}」` : ""}`;
+  hintEl.textContent = state.rendered < total ? `已显示 ${state.rendered} / ${total}` : "";
+}
+
+// ================= 过滤 =================
+function applyFilter() {
+  const kw = state.kw.trim().toLowerCase();
+  state.view = state.all.filter(it => {
+    if (state.cat !== "__all__" && it.cat !== state.cat) return false;
+    if (!kw) return true;
+    return ((it.name || "") + " " + (it.sku || "") + " " + (it.note || "") + " " + (it.cat || "") + " " + (it.id || ""))
+      .toLowerCase().includes(kw);
+  });
+  resetRender();
+}
+
+// ================= 侧栏 =================
+function renderCats() {
+  const map = new Map();
+  state.all.forEach(it => {
+    const c = it.cat || "未分类";
+    map.set(c, (map.get(c) || 0) + 1);
+  });
+  const arr = [...map.entries()].sort((a, b) => b[1] - a[1]);
+  let html = `<div class="cat ${state.cat === "__all__" ? "on" : ""}" data-cat="__all__">
+      <span class="nm">全部商品</span><span class="n">${state.all.length}</span></div>`;
+  html += arr.map(([c, n]) =>
+    `<div class="cat ${state.cat === c ? "on" : ""}" data-cat="${esc(c)}">
+      <span class="nm">${esc(c)}</span><span class="n">${n}</span></div>`
+  ).join("");
+  $("catList").innerHTML = html;
+
+  const withImg = state.all.filter(it => it.img).length;
+  const withLink = state.all.filter(it => it.url && it.url.trim()).length;
+  $("foot").innerHTML = `有图 <b>${withImg}</b> · 有链接 <b>${withLink}</b><br>
+    无链接 <b>${state.all.length - withLink}</b> 件待补`;
+  $("foot").style.display = state.all.length ? "block" : "none";
+}
+
+// ================= 交互 =================
+$("catList").addEventListener("click", e => {
+  const el = e.target.closest(".cat");
+  if (!el) return;
+  state.cat = el.dataset.cat;
+  renderCats();
+  applyFilter();
+  scroller.scrollTop = 0;
+});
+
+let kwTimer = null;
+$("q").addEventListener("input", e => {
+  const v = e.target.value;
+  $("searchWrap").classList.toggle("filled", !!v);
+  clearTimeout(kwTimer);
+  kwTimer = setTimeout(() => {
+    state.kw = v;
+    applyFilter();
+    scroller.scrollTop = 0;
+  }, 140);
+});
+
+$("clrBtn").addEventListener("click", () => {
+  $("q").value = "";
+  $("searchWrap").classList.remove("filled");
+  state.kw = "";
+  applyFilter();
+  $("q").focus();
+});
+
+$("seg").addEventListener("click", e => {
+  const b = e.target.closest("button[data-view]");
+  if (!b) return;
+  state.mode = b.dataset.view;
+  [...$("seg").children].forEach(x => x.classList.toggle("on", x === b));
+  $("zoomWrap").style.opacity = state.mode === "grid" ? "1" : ".35";
+  $("zoomWrap").style.pointerEvents = state.mode === "grid" ? "auto" : "none";
+  resetRender();
+  scroller.scrollTop = 0;
+});
+
+$("zoom").addEventListener("input", e => {
+  state.thumb = +e.target.value;
+  document.documentElement.style.setProperty("--thumb", state.thumb + "px");
+});
+
+grid.addEventListener("click", e => {
+  const el = e.target.closest("[data-id]");
+  if (!el) return;
+  const it = state.all.find(x => x.id === el.dataset.id);
+  if (!it) return;
+  if (it.url && it.url.trim()) {
+    let u = it.url.trim();
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    window.open(u, "_blank", "noopener");
+    toast("已打开：" + (it.name || it.sku));
+  } else {
+    toast("这件商品还没填链接 —— 先记下货号 " + (it.sku || it.id));
+  }
+});
+
+// 键盘
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    $("q").focus();
+    $("q").select();
+  }
+  if (e.key === "Escape" && document.activeElement === $("q")) {
+    $("q").value = "";
+    $("searchWrap").classList.remove("filled");
+    state.kw = "";
+    applyFilter();
+    $("q").blur();
+  }
+});
+
+// 无限滚动
+const io = new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting) {
+    renderMore();
+    updateCount();
+  }
+}, { root: scroller, rootMargin: "600px" });
+io.observe(sentinel);
+
+$("importBtn").addEventListener("click", () => toast("导入功能下一步接上（先在骨架里验证看图体验）"));
+
+// ================= 启动 =================
+async function boot() {
+  if (Array.isArray(window.__DATA__)) {
+    state.all = window.__DATA__;
+  } else {
+    try {
+      const res = await fetch("data/items.json", { cache: "no-store" });
+      state.all = await res.json();
+    } catch (err) {
+      state.all = [];
+      toast("数据加载失败：" + err.message);
+    }
+  }
+  renderCats();
+  applyFilter();
+  window.__ready = true;
+}
+
+boot();
+</script>
+</body>
+</html>
