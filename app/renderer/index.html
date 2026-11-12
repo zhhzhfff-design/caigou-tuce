@@ -14,6 +14,12 @@
     </svg>
   </button>
   <div class="right">
+    <button class="iconbtn" id="btnSelect" title="批量选择">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <rect x="3" y="3" width="18" height="18" rx="4"></rect>
+        <path d="M8 12.5l2.5 2.5L16 9.5"></path>
+      </svg>
+    </button>
     <div class="vt" id="vt">
       <button data-view="grid" class="on" title="图墙">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
@@ -231,6 +237,46 @@
 <div class="progress" id="progress">
   <div class="bar" id="bar"></div>
   <div class="txt" id="ptxt"></div>
+</div>
+
+<!-- ============ 大图预览 ============ -->
+<div class="lightbox" id="lightbox">
+  <button class="lbclose" id="lbClose">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M6 6l12 12M18 6L6 18"></path>
+    </svg>
+  </button>
+  <button class="lbnav prev" id="lbPrev">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M15 5l-7 7 7 7"></path>
+    </svg>
+  </button>
+  <button class="lbnav next" id="lbNext">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M9 5l7 7-7 7"></path>
+    </svg>
+  </button>
+  <div class="lbstage" id="lbStage"><img id="lbImg" alt=""></div>
+  <div class="lbbar">
+    <div class="lbtxt">
+      <div class="lbn" id="lbName"></div>
+      <div class="lbm">
+        <span class="lbsku" id="lbSku"></span>
+        <span class="lbprice" id="lbPrice"></span>
+      </div>
+    </div>
+    <button class="lbbtn" id="lbOpen">打开购买页 ↗</button>
+    <span class="lbidx" id="lbIdx"></span>
+  </div>
+</div>
+
+<!-- ============ 批量操作条 ============ -->
+<div class="selbar" id="selbar">
+  <span class="sn">已选 <b id="selCount">0</b> 件</span>
+  <button class="sb" id="selAll">全选</button>
+  <button class="sb" id="selInv">反选</button>
+  <button class="sb primary" id="selCancel">退出</button>
+  <button class="sb danger" id="selDel">删除选中</button>
 </div>
 
 <div class="toast" id="toast"></div>

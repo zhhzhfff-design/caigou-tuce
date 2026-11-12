@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("api", {
   openUrl: url => ipcRenderer.invoke("open-url", url),
   openDataDir: () => ipcRenderer.invoke("open-data-dir"),
   deleteItem: it => ipcRenderer.invoke("delete-item", it),
+  deleteMany: ids => ipcRenderer.invoke("delete-many", ids),
   clearAll: () => ipcRenderer.invoke("clear-all"),
 
   onProgress: cb => {

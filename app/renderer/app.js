@@ -5,7 +5,8 @@ const PAGE = 60;
 const state = {
   all: [], view: [], rendered: 0,
   cat: "__all__", kw: "", mode: "grid", thumb: 300,
-  dataDir: "", ctxItem: null, editing: null, busy: false
+  dataDir: "", ctxItem: null, editing: null, busy: false,
+  selectMode: false, selected: new Set()
 };
 
 const $ = id => document.getElementById(id);
@@ -102,7 +103,9 @@ function cardHTML(it, idx) {
   const src = imgUrl(it);
   const hasLink = !!(it.url && it.url.trim());
   const price = String(it.price || "").trim();
-  return `<article class="card" data-id="${esc(it.id)}" style="--i:${idx % 24}">
+  const picked = state.selected.has(it.id);
+  return `<article class="card${picked ? " picked" : ""}" data-id="${esc(it.id)}" style="--i:${idx % 24}">
+    <div class="ck">${picked ? CHECK_SVG : ""}</div>
     <div class="thumb">
       ${src
         ? `<img src="${src}" alt="" loading="lazy" onload="this.classList.add('loaded');this.parentNode.classList.add('loaded')" onerror="imgFail(this)">`
@@ -123,7 +126,9 @@ function cardHTML(it, idx) {
 function rowHTML(it) {
   const src = imgUrl(it);
   const hasLink = !!(it.url && it.url.trim());
-  return `<div class="row" data-id="${esc(it.id)}">
+  const picked = state.selected.has(it.id);
+  return `<div class="row${picked ? " picked" : ""}" data-id="${esc(it.id)}">
+    <div class="ck">${picked ? CHECK_SVG : ""}</div>
     ${src ? `<img class="rt" src="${src}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<div class="rt"></div>`}
     <div class="rn">
       <span class="t">${esc(it.name || it.orig || "未命名商品")}</span>
@@ -135,6 +140,8 @@ function rowHTML(it) {
     <div class="go">打开 ↗</div>
   </div>`;
 }
+
+const CHECK_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>';
 
 const LIST_HEAD = `<div class="lhead">
   <div class="h1"></div><div class="h2">商品名称 / 货号</div>
@@ -642,6 +649,74 @@ $("ctx").addEventListener("click", async e => {
   }
 });
 
+/* ================= 批量选择 ================= */
+function updateSelBar() {
+  $("selCount").textContent = String(state.selected.size);
+}
+
+function togglePick(it, el) {
+  const ck = el.querySelector(".ck");
+  if (state.selected.has(it.id)) {
+    state.selected.delete(it.id);
+    el.classList.remove("picked");
+    if (ck) ck.innerHTML = "";
+  } else {
+    state.selected.add(it.id);
+    el.classList.add("picked");
+    if (ck) ck.innerHTML = CHECK_SVG;
+  }
+  updateSelBar();
+}
+
+function toggleSelectMode(on) {
+  state.selectMode = on;
+  document.body.classList.toggle("selmode", on);
+  $("selbar").classList.toggle("show", on);
+  $("btnSelect").classList.toggle("on", on);
+  if (!on) state.selected.clear();
+  const canZoom = !on && state.mode === "grid";
+  $("zoomWrap").style.opacity = canZoom ? "1" : ".25";
+  $("zoomWrap").style.pointerEvents = canZoom ? "auto" : "none";
+  resetRender();
+  updateSelBar();
+}
+
+$("btnSelect").addEventListener("click", () => toggleSelectMode(!state.selectMode));
+$("selCancel").addEventListener("click", () => toggleSelectMode(false));
+
+$("selAll").addEventListener("click", () => {
+  if (!state.view.length) return;
+  const allPicked = state.view.every(it => state.selected.has(it.id));
+  if (allPicked) state.view.forEach(it => state.selected.delete(it.id));
+  else state.view.forEach(it => state.selected.add(it.id));
+  resetRender();
+  updateSelBar();
+});
+
+$("selInv").addEventListener("click", () => {
+  if (!state.view.length) return;
+  state.view.forEach(it => {
+    if (state.selected.has(it.id)) state.selected.delete(it.id);
+    else state.selected.add(it.id);
+  });
+  resetRender();
+  updateSelBar();
+});
+
+$("selDel").addEventListener("click", async () => {
+  const n = state.selected.size;
+  if (!n) return toast("还没选东西呢");
+  if (!confirm(`确定删除选中的 ${n} 件商品？\n\n对应的图片和缩略图会一起删掉，不能恢复。`)) return;
+  const ids = [...state.selected];
+  $("selDel").textContent = "删除中…";
+  await window.api.deleteMany(ids);
+  $("selDel").textContent = "删除选中";
+  state.selected.clear();
+  toggleSelectMode(false);
+  await reload();
+  toast(`已删除 ${n} 件商品`, 2600);
+});
+
 /* ================= 交互 ================= */
 $("btnAdd").addEventListener("click", () => openPanel("importPanel"));
 
@@ -690,11 +765,29 @@ $("zoom").addEventListener("input", e => {
   document.documentElement.style.setProperty("--thumb", state.thumb + "px");
 });
 
+let lastPickIdx = -1;
+let clickTimer = null;
+
 grid.addEventListener("click", e => {
   const el = e.target.closest("[data-id]");
   if (!el) return;
   const it = state.all.find(x => x.id === el.dataset.id);
   if (!it) return;
+
+  // 选择模式：立即响应，支持 Shift 连选
+  if (state.selectMode) {
+    const idx = state.view.findIndex(x => x.id === it.id);
+    if (e.shiftKey && lastPickIdx >= 0 && idx >= 0) {
+      const a = Math.min(lastPickIdx, idx), b = Math.max(lastPickIdx, idx);
+      for (let i = a; i <= b; i++) state.selected.add(state.view[i].id);
+      resetRender();
+      updateSelBar();
+    } else {
+      togglePick(it, el);
+    }
+    lastPickIdx = idx;
+    return;
+  }
 
   const act = e.target.closest("[data-act]");
   if (act && act.dataset.act === "edit") {
@@ -703,12 +796,80 @@ grid.addEventListener("click", e => {
     return;
   }
 
-  if (it.url && it.url.trim()) {
-    window.api.openUrl(it.url);
-    toast("已打开 · " + (it.sku || it.name || it.id));
-  } else {
-    openEdit(it);
-  }
+  // 单击延迟 220ms，给双击留判断时间
+  if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; }
+  clickTimer = setTimeout(() => {
+    clickTimer = null;
+    if (it.url && it.url.trim()) {
+      window.api.openUrl(it.url);
+      toast("已打开 · " + (it.sku || it.name || it.id));
+    } else {
+      openEdit(it);
+    }
+  }, 220);
+});
+
+grid.addEventListener("dblclick", e => {
+  if (state.selectMode) return;
+  const el = e.target.closest("[data-id]");
+  if (!el) return;
+  if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+  const it = state.all.find(x => x.id === el.dataset.id);
+  if (it) openLightbox(it);
+});
+
+/* ================= 大图预览 ================= */
+let lbList = [], lbIndex = 0;
+
+function renderLightbox() {
+  const it = lbList[lbIndex];
+  if (!it) return;
+  const src = imgUrl(it);
+  const img = $("lbImg");
+  if (src) { img.src = src; img.style.display = "block"; } else { img.style.display = "none"; }
+  $("lbName").textContent = it.name || it.orig || "未命名商品";
+  $("lbSku").textContent = it.sku || it.id;
+  $("lbPrice").textContent = it.price || "";
+  $("lbPrice").style.display = it.price ? "inline-block" : "none";
+  $("lbIdx").textContent = (lbIndex + 1) + " / " + lbList.length;
+  $("lbOpen").style.display = (it.url && it.url.trim()) ? "inline-flex" : "none";
+}
+
+function openLightbox(it) {
+  lbList = state.view.length ? state.view : [it];
+  lbIndex = lbList.findIndex(x => x.id === it.id);
+  if (lbIndex < 0) { lbList = [it]; lbIndex = 0; }
+  renderLightbox();
+  $("lightbox").classList.add("show");
+}
+
+function moveLightbox(step) {
+  if (lbList.length < 2) return;
+  lbIndex = (lbIndex + step + lbList.length) % lbList.length;
+  renderLightbox();
+}
+
+function closeLightbox() {
+  $("lightbox").classList.remove("show");
+  $("lbImg").removeAttribute("src");
+}
+
+$("lbClose").addEventListener("click", closeLightbox);
+$("lbPrev").addEventListener("click", e => { e.stopPropagation(); moveLightbox(-1); });
+$("lbNext").addEventListener("click", e => { e.stopPropagation(); moveLightbox(1); });
+$("lightbox").addEventListener("click", e => {
+  const t = e.target;
+  if (t.id === "lightbox" || t.id === "lbStage") closeLightbox();
+});
+$("lbOpen").addEventListener("click", () => {
+  const it = lbList[lbIndex];
+  if (it && it.url) window.api.openUrl(it.url);
+});
+document.addEventListener("keydown", e => {
+  if (!$("lightbox").classList.contains("show")) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowLeft") moveLightbox(-1);
+  else if (e.key === "ArrowRight") moveLightbox(1);
 });
 
 document.addEventListener("keydown", e => {

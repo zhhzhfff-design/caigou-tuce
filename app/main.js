@@ -513,19 +513,47 @@ ipcMain.handle("replace-image", async (e, payload) => {
 });
 
 /* 删除单条 */
-ipcMain.handle("delete-item", (e, it) => {
-  if (!it || !it.id) return { ok: false };
+/* 删干净一件商品的图片和缩略图 */
+function removeItemFiles(it) {
   try {
     if (it.img) {
       const p = path.join(IMG_DIR, it.img);
       if (fs.existsSync(p)) fs.unlinkSync(p);
     }
-    const tp = path.join(THUMB_DIR, it.id + ".jpg");
-    if (fs.existsSync(tp)) fs.unlinkSync(tp);
-  } catch (err) { console.error("删文件失败", err.message); }
+  } catch (err) { console.error("删原图失败", it.id, err.message); }
+  try {
+    // 缩略图文件名不一定等于 id（可能带时间戳或 ex_ 前缀），以记录为准
+    const names = new Set();
+    if (it.thumb) names.add(it.thumb);
+    names.add(it.id + ".jpg");
+    for (const n of names) {
+      const tp = path.join(THUMB_DIR, n);
+      if (fs.existsSync(tp)) fs.unlinkSync(tp);
+    }
+  } catch (err) { console.error("删缩略图失败", it.id, err.message); }
+}
+
+ipcMain.handle("delete-item", (e, it) => {
+  if (!it || !it.id) return { ok: false };
+  removeItemFiles(it);
   const items = readItems().filter(x => x.id !== it.id);
   writeItems(items);
   return { ok: true, total: items.length };
+});
+
+/* 批量删除 */
+ipcMain.handle("delete-many", (e, ids) => {
+  const set = new Set(Array.isArray(ids) ? ids : []);
+  if (!set.size) return { ok: true, removed: 0, total: readItems().length };
+  const all = readItems();
+  const keep = [];
+  let removed = 0;
+  for (const it of all) {
+    if (set.has(it.id)) { removeItemFiles(it); removed++; }
+    else keep.push(it);
+  }
+  writeItems(keep);
+  return { ok: true, removed, total: keep.length };
 });
 
 /* 生成模板表格内容（用 xlsx 写，主进程存到临时目录并返回路径） */
