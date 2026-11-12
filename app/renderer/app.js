@@ -696,6 +696,64 @@ $("ctx").addEventListener("click", async e => {
   }
 });
 
+/* ================= 主题与亮度 ================= */
+const THEMES = [
+  { id: "dark",  name: "暗夜", bg: "#0A0A0A", panel: "#141414", accent: "#FFFFFF" },
+  { id: "light", name: "纯白", bg: "#F3F5F9", panel: "#FFFFFF", accent: "#1F3864" },
+  { id: "candy", name: "糖果", bg: "#FFF3F8", panel: "#FFE9F2", accent: "#FF6FA5" },
+  { id: "cyber", name: "赛博", bg: "#06040F", panel: "#1B1438", accent: "#00E5FF" },
+  { id: "pink",  name: "少女", bg: "#FFF0F5", panel: "#FFE3EE", accent: "#FF4D8D" },
+  { id: "toon",  name: "搞怪", bg: "#FFF8D6", panel: "#FFF0A8", accent: "#7C3AED" }
+];
+
+function renderThemes(cur) {
+  $("themeList").innerHTML = THEMES.map(t => `
+    <div class="thm${t.id === cur ? " on" : ""}" data-t="${t.id}">
+      <div class="sw" style="background:${t.bg}">
+        <i style="background:${t.panel};box-shadow:inset 0 0 0 1px rgba(128,128,128,.3)"></i>
+        <i style="background:${t.accent}"></i>
+      </div>
+      <div class="nm">${t.name}</div>
+    </div>`).join("");
+}
+
+function applyTheme(id) {
+  document.body.dataset.theme = id;
+  try { localStorage.setItem("cg_theme", id); } catch (e) {}
+  renderThemes(id);
+}
+
+function applyLum(v) {
+  let color = "#000000", alpha = 0;
+  if (v < 100) alpha = ((100 - v) / 100) * 0.55;
+  else if (v > 100) { color = "#FFFFFF"; alpha = ((v - 100) / 100) * 0.4; }
+  document.body.style.setProperty("--ov-color", color);
+  document.body.style.setProperty("--ov-alpha", alpha.toFixed(3));
+  $("lumVal").textContent = v + "%";
+  try { localStorage.setItem("cg_lum", String(v)); } catch (e) {}
+}
+
+$("btnTheme").addEventListener("click", () => openPanel("themePanel"));
+$("themeList").addEventListener("click", e => {
+  const el = e.target.closest(".thm");
+  if (el) applyTheme(el.dataset.t);
+});
+$("lum").addEventListener("input", e => applyLum(+e.target.value));
+
+(function initTheme() {
+  let t = "dark", l = 100;
+  try {
+    t = localStorage.getItem("cg_theme") || "dark";
+    l = parseInt(localStorage.getItem("cg_lum") || "100", 10);
+    if (!isFinite(l)) l = 100;
+  } catch (e) {}
+  if (!THEMES.some(x => x.id === t)) t = "dark";
+  document.body.dataset.theme = t;
+  renderThemes(t);
+  $("lum").value = String(l);
+  applyLum(l);
+})();
+
 /* ================= 批量选择 ================= */
 function updateSelBar() {
   $("selCount").textContent = String(state.selected.size);

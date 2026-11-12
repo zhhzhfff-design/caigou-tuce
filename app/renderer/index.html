@@ -14,6 +14,14 @@
     </svg>
   </button>
   <div class="right">
+    <button class="iconbtn" id="btnTheme" title="外观 / 主题">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+        <path d="M12 3a9 9 0 100 18 2 2 0 001.7-3 2 2 0 011.7-3H18a3 3 0 003-3 9 9 0 00-9-9z"></path>
+        <circle cx="7.6" cy="10.4" r="1.15" fill="currentColor" stroke="none"></circle>
+        <circle cx="12" cy="7.4" r="1.15" fill="currentColor" stroke="none"></circle>
+        <circle cx="16.4" cy="10.4" r="1.15" fill="currentColor" stroke="none"></circle>
+      </svg>
+    </button>
     <button class="iconbtn" id="btnSelect" title="批量选择">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
         <rect x="3" y="3" width="18" height="18" rx="4"></rect>
@@ -245,6 +253,28 @@
 <div class="progress" id="progress">
   <div class="bar" id="bar"></div>
   <div class="txt" id="ptxt"></div>
+</div>
+
+<!-- ============ 主题面板 ============ -->
+<div class="panel" id="themePanel" style="width:440px">
+  <div class="ph">
+    <h3>外观</h3>
+    <button class="x" data-close>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 6l12 12M18 6L6 18"></path>
+      </svg>
+    </button>
+  </div>
+  <div class="pb">
+    <div class="themes" id="themeList"></div>
+    <div class="field" style="margin-top:24px;margin-bottom:4px">
+      <label>界面亮度 <span id="lumVal" style="float:right;opacity:.75">100%</span></label>
+      <input type="range" id="lum" min="30" max="130" step="5" value="100" style="width:100%;margin-top:6px">
+    </div>
+    <p style="font-size:11.5px;color:var(--txt3);margin-top:10px;line-height:1.8">
+      100% 是原始亮度。往左调变暗（晚上用眼舒服），往右调变亮。
+    </p>
+  </div>
 </div>
 
 <!-- ============ 大图预览 ============ -->
