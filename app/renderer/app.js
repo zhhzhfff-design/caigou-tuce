@@ -60,6 +60,7 @@ const CAT_RULES = [
   { cat: "键鼠外设", keys: ["键盘", "鼠标", "键鼠", "手柄"] },
   { cat: "存储", keys: ["u盘", "移动硬盘", "内存卡", "tf卡", "读卡器", "固态"] },
   { cat: "小家电", keys: ["风扇", "加湿器", "电煮锅", "榨汁", "净水", "吹风机", "剃须刀"] },
+  { cat: "灯饰", keys: ["壁灯", "吊灯", "台灯", "吸顶灯", "射灯", "筒灯", "灯带", "落地灯", "氛围灯", "灯泡", "led灯"] },
   { cat: "家居日用", keys: ["收纳", "挂钩", "置物架", "清洁", "抹布", "垃圾桶", "拖鞋", "毛巾"] },
   { cat: "厨房用品", keys: ["锅", "碗", "杯", "餐具", "刀具", "保鲜", "砧板"] },
   { cat: "美妆个护", keys: ["面膜", "洗发", "沐浴", "牙刷", "护肤", "香水", "口红"] },
@@ -74,6 +75,14 @@ function autoCategorize(name) {
     if (r.keys.some(k => s.includes(k))) return r.cat;
   }
   return "";
+}
+
+/* 长标题截短：优先取第一个逗号前的部分 */
+function shortTitle(t) {
+  const s = String(t || "").trim();
+  if (!s) return "";
+  const cut = s.split(/[，,]/)[0].trim();
+  return cut.length > 40 ? cut.slice(0, 40) + "…" : cut;
 }
 
 async function autoCategorizeAll() {
@@ -326,7 +335,7 @@ const HEADER_WORDS = [
   ["img", ["图片文件名", "图片名", "图片", "文件名", "主图", "image", "filename", "img", "file"]],
   ["url", ["采购链接", "商品链接", "链接地址", "链接", "采购地址", "地址", "url", "link"]],
   ["sku", ["货号", "编号", "sku", "编码", "款号", "型号", "code"]],
-  ["price", ["价格", "跟卖价", "最低价", "售价", "报价", "单价", "金额", "price", "cost"]],
+  ["price", ["价格(¥)", "跟卖价", "最低价", "采购价", "成本价", "售价", "价格(元)", "价格", "报价", "单价", "price", "cost"]],
   ["category", ["分类", "类目", "品类", "category", "cat"]],
   ["name", ["商品名称", "商品名", "产品名称", "名称", "品名", "title", "name"]],
   ["note", ["备注", "说明", "note", "remark", "memo"]]
@@ -337,9 +346,13 @@ function detectHeader(row) {
   const clean = v => String(v || "").trim().toLowerCase().replace(/[\s_\-]/g, "");
   for (const [key, words] of HEADER_WORDS) {
     let idx = -1;
-    for (let i = 0; i < row.length; i++) {
-      if (used.has(i)) continue;
-      if (words.includes(clean(row[i]))) { idx = i; break; }
+    // 精确匹配时按关键词优先级走，而不是按列顺序
+    for (const w of words) {
+      for (let i = 0; i < row.length; i++) {
+        if (used.has(i)) continue;
+        if (clean(row[i]) === w) { idx = i; break; }
+      }
+      if (idx >= 0) break;
     }
     if (idx < 0) {
       for (let i = 0; i < row.length; i++) {
@@ -353,7 +366,8 @@ function detectHeader(row) {
   return map;
 }
 
-async function applyTable(rows) {
+async function applyTable(rows, images) {
+  images = images || {};
   if (!rows || !rows.length) return toast("表格是空的");
 
   const head = detectHeader(rows[0]);
@@ -378,12 +392,25 @@ async function applyTable(rows) {
     if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
   });
 
-  let updated = 0, created = 0;
+  let updated = 0, created = 0, createdWithImg = 0, updatedWithImg = 0;
   for (let i = start; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r.some(c => String(c || "").trim() !== "")) continue;
 
-    const imgName = get(r, "img");
+    const rawImg = get(r, "img");
+    let embedded = null;
+    let imgName = rawImg;
+    // 整行扫一遍找嵌入图片标记（表格里可能没有"图片"这一列）
+    for (let ci = 0; ci < r.length; ci++) {
+      const cellV = String(r[ci] == null ? "" : r[ci]);
+      const tag = /^__IMG__:(ID_[A-Za-z0-9]+)$/.exec(cellV);
+      if (tag) { embedded = images[tag[1]] || null; break; }
+    }
+    const imTag = /^__IMG__:(ID_[A-Za-z0-9]+)$/.exec(rawImg);
+    if (imTag) {
+      if (!embedded) embedded = images[imTag[1]] || null;
+      imgName = embedded ? embedded.file : "";
+    }
     const name = get(r, "name");
     const url = get(r, "url");
     const cat = get(r, "category");
@@ -400,22 +427,26 @@ async function applyTable(rows) {
       if (sku) hit.sku = sku;
       if (note) hit.note = note;
       if (price) hit.price = price;
+      if (embedded && !hit.img) { hit.img = embedded.file; hit.thumb = embedded.thumb; delete hit.pending; updatedWithImg++; }
+      if (!hit.name && embedded && embedded.title) hit.name = shortTitle(embedded.title);
       updated++;
     } else {
-      const finalName = name || (imgName ? imgName.replace(/\.[^.]+$/, "") : "");
+      const finalName = shortTitle(name || (embedded && embedded.title) || (imgName ? imgName.replace(/\.[^.]+$/, "") : "")) || sku || "";
       const item = {
         id: "C" + String(++maxSeq).padStart(4, "0"),
         orig: imgName || "",
-        img: "", thumb: "",
+        img: embedded ? embedded.file : "",
+        thumb: embedded ? embedded.thumb : "",
         name: finalName,
         sku, url, note, price,
         cat: cat || autoCategorize(finalName),
-        pending: true,
+        pending: !embedded,
         ts: Date.now()
       };
       state.all.push(item);
       if (imgName) byOrig.set(norm(imgName), item);
       created++;
+      if (embedded) createdWithImg++;
     }
   }
 
@@ -425,7 +456,7 @@ async function applyTable(rows) {
   if (autoN) await reload();
   let msg = [];
   if (updated) msg.push(`更新 ${updated} 条`);
-  if (created) msg.push(`新增 ${created} 条（等图片）`);
+  if (created) msg.push(createdWithImg ? `新增 ${created} 条（含 ${createdWithImg} 张图）` : `新增 ${created} 条（等图片）`);
   if (autoN) msg.push(`自动归类 ${autoN} 条`);
   toast("表格导入完成：" + (msg.join("，") || "没有变化"), 3600);
 }
@@ -434,7 +465,7 @@ $("optTable").addEventListener("click", async () => {
   const r = await window.api.pickTable();
   if (!r.ok) { if (r.error) toast("读取失败：" + r.error, 4000); return; }
   closePanels();
-  await applyTable(r.rows);
+  await applyTable(r.rows, r.images);
 });
 
 $("optTpl").addEventListener("click", async () => {
@@ -496,7 +527,7 @@ document.addEventListener("drop", async e => {
 
   if (table) {
     const r = await window.api.readTableFile(table);
-    if (r.ok) await applyTable(r.rows);
+    if (r.ok) await applyTable(r.rows, r.images);
     else toast("表格读取失败：" + (r.error || ""), 4000);
   }
   if (imgs.length) await doImportPaths(imgs);

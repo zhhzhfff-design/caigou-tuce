@@ -178,12 +178,77 @@ function downloadImage(url, dest, depth = 0) {
 }
 
 /* ---------------- 表格解析 ---------------- */
+/* 提取 WPS 表格里的嵌入图片（DISPIMG） */
+function extractCellImages(wb) {
+  const out = {};
+  const files = wb.files || {};
+  const cellFile = files["xl/cellimages.xml"];
+  const relFile = files["xl/_rels/cellimages.xml.rels"];
+  if (!cellFile || !relFile) return out;
+
+  const cellStr = cellFile.content ? cellFile.content.toString("utf8") : String(cellFile);
+  const relStr = relFile.content ? relFile.content.toString("utf8") : String(relFile);
+
+  const relMap = {};
+  const relRe = /<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Target="([^"]+)"/g;
+  let m;
+  while ((m = relRe.exec(relStr))) relMap[m[1]] = m[2];
+
+  const cellRe = /<etc:cellImage>([\s\S]*?)<\/etc:cellImage>/g;
+  let idx = 0;
+  while ((m = cellRe.exec(cellStr))) {
+    const blk = m[1];
+    const nameM = /name="(ID_[^"]+)"/.exec(blk);
+    const descrM = /descr="([^"]*)"/.exec(blk);
+    const embedM = /r:embed="([^"]+)"/.exec(blk);
+    if (!nameM || !embedM) continue;
+
+    const target = relMap[embedM[1]];
+    if (!target || target === "NULL") continue;
+    const inner = "xl/" + target.replace(/^\.?\//, "");
+    const f = files[inner];
+    if (!f || !f.content) continue;
+
+    idx++;
+    // 同一个 ID 用固定文件名，重复导入会覆盖，不留垃圾
+    const base = "ex_" + nameM[1].slice(3, 15);
+    const ext = (path.extname(inner) || ".jpg").toLowerCase();
+    const imgName = base + ext;
+    const dest = path.join(IMG_DIR, imgName);
+
+    try {
+      fs.writeFileSync(dest, f.content);
+      if (!isValidImageFile(dest)) { fs.unlinkSync(dest); continue; }
+      out[nameM[1]] = {
+        file: imgName,
+        thumb: makeThumb(dest, base),
+        title: descrM ? descrM[1].trim() : ""
+      };
+    } catch (e) {
+      console.error("提取嵌入图片失败", nameM[1], e.message);
+    }
+  }
+  return out;
+}
+
 function parseTableFile(filePath) {
-  const wb = XLSX.readFile(filePath, { cellDates: false, raw: false });
+  const wb = XLSX.readFile(filePath, { cellDates: false, raw: false, bookFiles: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  if (!sheet) return { rows: [] };
+  if (!sheet) return { rows: [], images: {} };
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, defval: "" });
-  return { rows };
+
+  // 把 =DISPIMG("ID_xxx",1) 换成标记，交给前端识别
+  for (const row of rows) {
+    for (let i = 0; i < row.length; i++) {
+      const v = String(row[i] == null ? "" : row[i]);
+      if (v.indexOf("DISPIMG") === -1) continue;
+      const idm = /(ID_[A-Za-z0-9]+)/.exec(v);
+      if (idm) row[i] = "__IMG__:" + idm[1];
+    }
+  }
+
+  const images = extractCellImages(wb);
+  return { rows, images };
 }
 
 /* ---------------- 主进程事件 ---------------- */
@@ -364,8 +429,8 @@ ipcMain.handle("pick-table", async () => {
   });
   if (r.canceled || !r.filePaths[0]) return { ok: false };
   try {
-    const { rows } = parseTableFile(r.filePaths[0]);
-    return { ok: true, rows, file: path.basename(r.filePaths[0]) };
+    const { rows, images } = parseTableFile(r.filePaths[0]);
+    return { ok: true, rows, images, file: path.basename(r.filePaths[0]) };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -388,8 +453,8 @@ ipcMain.handle("clear-all", () => {
 /* 读取指定表格文件（拖拽进来时用） */
 ipcMain.handle("read-table-file", (e, p) => {
   try {
-    const { rows } = parseTableFile(p);
-    return { ok: true, rows };
+    const { rows, images } = parseTableFile(p);
+    return { ok: true, rows, images };
   } catch (err) {
     return { ok: false, error: err.message };
   }
