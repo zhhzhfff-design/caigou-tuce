@@ -558,10 +558,10 @@ ipcMain.handle("delete-many", (e, ids) => {
 
 /* 生成模板表格内容（用 xlsx 写，主进程存到临时目录并返回路径） */
 ipcMain.handle("make-template", async () => {
-  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "价格", "备注"];
+  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "售价(€)", "成本(¥)", "重量(g)", "备注"];
   const sample = [
-    ["A001.jpg", "三合一数据线 1米", "https://detail.1688.com/offer/123456789.html", "数据线", "DL-0001", "20", "供应商A"],
-    ["A002.jpg", "20W PD快充头", "https://detail.1688.com/offer/987654321.html", "充电器", "CD-0001", "15.5", ""]
+    ["A001.jpg", "三合一数据线 1米", "https://detail.1688.com/offer/123456789.html", "数据线", "DL-0001", "9.9", "20", "120", "供应商A"],
+    ["A002.jpg", "20W PD快充头", "https://detail.1688.com/offer/987654321.html", "充电器", "CD-0001", "15.5", "68", "590", ""]
   ];
   const ws = XLSX.utils.aoa_to_sheet([header, ...sample]);
   ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 24 }];
@@ -580,7 +580,7 @@ ipcMain.handle("make-template", async () => {
 
 /* 导出当前清单 */
 ipcMain.handle("export-list", async (e, items) => {
-  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "价格", "备注"];
+  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "售价(€)", "成本(¥)", "重量(g)", "备注"];
   const body = items.map(it => [
     it.orig || it.img || "",
     it.name || "",
@@ -588,10 +588,12 @@ ipcMain.handle("export-list", async (e, items) => {
     it.cat || "",
     it.sku || "",
     it.price || "",
+    it.cost || "",
+    it.weight || "",
     it.note || ""
   ]);
   const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
-  ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 24 }];
+  ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 24 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "商品清单");
 

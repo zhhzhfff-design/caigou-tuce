@@ -78,6 +78,24 @@ function autoCategorize(name) {
   return "";
 }
 
+/* 价格两位小数，去掉多余零 */
+function fmtPrice(v) {
+  const n = parseFloat(v);
+  if (!isFinite(n)) return String(v || "");
+  return n.toFixed(2).replace(/\.?0+$/, "");
+}
+
+/* 重量统一按克显示，超过 1000 转 kg */
+function fmtWeight(w) {
+  const n = parseFloat(w);
+  if (!isFinite(n) || n <= 0) return "";
+  if (n >= 1000) {
+    const kg = n / 1000;
+    return (kg % 1 === 0 ? kg.toFixed(0) : kg.toFixed(2)) + "kg";
+  }
+  return Math.round(n) + "g";
+}
+
 /* 长标题截短：优先取第一个逗号前的部分 */
 function shortTitle(t) {
   const s = String(t || "").trim();
@@ -103,6 +121,12 @@ function cardHTML(it, idx) {
   const src = imgUrl(it);
   const hasLink = !!(it.url && it.url.trim());
   const price = String(it.price || "").trim();
+  const cost = String(it.cost || "").trim();
+  const weight = String(it.weight || "").trim();
+  const subParts = [];
+  if (cost) subParts.push("¥" + fmtPrice(cost));
+  if (weight) subParts.push(fmtWeight(weight));
+  const sub = subParts.filter(Boolean).join(" · ");
   const picked = state.selected.has(it.id);
   return `<article class="card${picked ? " picked" : ""}" data-id="${esc(it.id)}" style="--i:${idx % 24}">
     <div class="ck">${picked ? CHECK_SVG : ""}</div>
@@ -110,7 +134,10 @@ function cardHTML(it, idx) {
       ${src
         ? `<img src="${src}" alt="" loading="lazy" onload="this.classList.add('loaded');this.parentNode.classList.add('loaded')" onerror="imgFail(this)">`
         : `<div class="ph">暂无图片</div>`}
-      ${price ? `<span class="price">${esc(price)}</span>` : ""}
+      ${(price || sub) ? `<div class="tagbox">
+        ${price ? `<span class="tp">€${esc(fmtPrice(price))}</span>` : ""}
+        ${sub ? `<span class="ts">${esc(sub)}</span>` : ""}
+      </div>` : ""}
     </div>
     <div class="info">
       <div class="n">${esc(it.name || it.orig || "未命名商品")}</div>
@@ -135,7 +162,9 @@ function rowHTML(it) {
       <span class="s">${esc(it.sku || it.id)}</span>
     </div>
     <div class="rc">${esc(it.cat || "未分类")}</div>
-    <div class="rp">${it.price ? esc(it.price) : ""}</div>
+    <div class="rp">${it.price ? "€" + esc(fmtPrice(it.price)) : ""}</div>
+    <div class="rq">${it.cost ? "¥" + esc(fmtPrice(it.cost)) : ""}</div>
+    <div class="rw">${it.weight ? esc(fmtWeight(it.weight)) : ""}</div>
     <div class="rl ${hasLink ? "ok" : "no"}">${hasLink ? "已关联" : "无链接"}</div>
     <div class="go">打开 ↗</div>
   </div>`;
@@ -145,7 +174,7 @@ const CHECK_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" s
 
 const LIST_HEAD = `<div class="lhead">
   <div class="h1"></div><div class="h2">商品名称 / 货号</div>
-  <div class="h3">分类</div><div class="h6">价格</div><div class="h4">链接</div><div class="h5"></div>
+  <div class="h3">分类</div><div class="h6">售价</div><div class="h6">成本</div><div class="h7">重量</div><div class="h4">链接</div><div class="h5"></div>
 </div>`;
 
 function renderMore() {
@@ -209,7 +238,7 @@ function applyFilter() {
     if (state.cat !== "__all__" && (it.cat || "未分类") !== state.cat) return false;
     if (!kw) return true;
     return ((it.name || "") + " " + (it.sku || "") + " " + (it.note || "") + " " +
-      (it.cat || "") + " " + (it.id || "") + " " + (it.orig || "") + " " + (it.price || ""))
+      (it.cat || "") + " " + (it.id || "") + " " + (it.orig || "") + " " + (it.price || "") + " " + (it.cost || "") + " " + (it.weight || ""))
       .toLowerCase().includes(kw);
   });
   resetRender();
@@ -342,7 +371,9 @@ const HEADER_WORDS = [
   ["img", ["图片文件名", "图片名", "图片", "文件名", "主图", "image", "filename", "img", "file"]],
   ["url", ["采购链接", "商品链接", "链接地址", "链接", "采购地址", "地址", "url", "link"]],
   ["sku", ["货号", "编号", "sku", "编码", "款号", "型号", "code"]],
-  ["price", ["价格(¥)", "跟卖价", "最低价", "采购价", "成本价", "售价", "价格(元)", "价格", "报价", "单价", "price", "cost"]],
+  ["cost", ["价格(¥)", "价格(元)", "采购价", "成本价", "进价", "1688价格", "成本", "人民币", "cost"]],
+  ["price", ["售价", "跟卖价", "最低价", "卖价", "零售价", "price"]],
+  ["weight", ["重量(G)", "重量(g)", "重量(KG)", "重量(kg)", "克重", "毛重", "重量", "weight"]],
   ["category", ["分类", "类目", "品类", "category", "cat"]],
   ["name", ["商品名称", "商品名", "产品名称", "名称", "品名", "title", "name"]],
   ["note", ["备注", "说明", "note", "remark", "memo"]]
@@ -424,6 +455,16 @@ async function applyTable(rows, images) {
     const sku = get(r, "sku");
     const note = get(r, "note");
     const price = get(r, "price");
+    const cost = get(r, "cost");
+    let weight = get(r, "weight");
+    // 如果重量列的单位是 KG，统一换算成克
+    if (weight && col.weight !== undefined) {
+      const colName = String(rows[0][col.weight] || "");
+      if (/kg/i.test(colName)) {
+        const n = parseFloat(weight);
+        if (isFinite(n)) weight = String(Math.round(n * 1000));
+      }
+    }
 
     const hit = imgName ? byOrig.get(norm(imgName)) : (name ? byOrig.get(norm(name)) : null);
 
@@ -434,6 +475,8 @@ async function applyTable(rows, images) {
       if (sku) hit.sku = sku;
       if (note) hit.note = note;
       if (price) hit.price = price;
+      if (cost) hit.cost = cost;
+      if (weight) hit.weight = weight;
       if (embedded && !hit.img) { hit.img = embedded.file; hit.thumb = embedded.thumb; delete hit.pending; updatedWithImg++; }
       if (!hit.name && embedded && embedded.title) hit.name = shortTitle(embedded.title);
       updated++;
@@ -445,7 +488,7 @@ async function applyTable(rows, images) {
         img: embedded ? embedded.file : "",
         thumb: embedded ? embedded.thumb : "",
         name: finalName,
-        sku, url, note, price,
+        sku, url, note, price, cost, weight,
         cat: cat || autoCategorize(finalName),
         pending: !embedded,
         ts: Date.now()
@@ -552,6 +595,8 @@ function openEdit(it) {
   $("edName").value = it.name || "";
   $("edSku").value = it.sku || "";
   $("edPrice").value = it.price || "";
+  $("edCost").value = it.cost || "";
+  $("edWeight").value = it.weight || "";
   $("edCat").value = it.cat || "";
   $("edUrl").value = it.url || "";
   $("edNote").value = it.note || "";
@@ -565,6 +610,8 @@ $("edSave").addEventListener("click", async () => {
   it.name = $("edName").value.trim();
   it.sku = $("edSku").value.trim();
   it.price = $("edPrice").value.trim();
+  it.cost = $("edCost").value.trim();
+  it.weight = $("edWeight").value.trim();
   it.cat = $("edCat").value.trim();
   it.url = $("edUrl").value.trim();
   it.note = $("edNote").value.trim();
@@ -829,8 +876,12 @@ function renderLightbox() {
   if (src) { img.src = src; img.style.display = "block"; } else { img.style.display = "none"; }
   $("lbName").textContent = it.name || it.orig || "未命名商品";
   $("lbSku").textContent = it.sku || it.id;
-  $("lbPrice").textContent = it.price || "";
-  $("lbPrice").style.display = it.price ? "inline-block" : "none";
+  const bits = [];
+  if (it.price) bits.push("€" + fmtPrice(it.price));
+  if (it.cost) bits.push("¥" + fmtPrice(it.cost));
+  if (it.weight) bits.push(fmtWeight(it.weight));
+  $("lbPrice").textContent = bits.join("  ·  ");
+  $("lbPrice").style.display = bits.length ? "inline-block" : "none";
   $("lbIdx").textContent = (lbIndex + 1) + " / " + lbList.length;
   $("lbOpen").style.display = (it.url && it.url.trim()) ? "inline-flex" : "none";
 }
