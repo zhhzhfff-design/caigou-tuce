@@ -28,3 +28,7 @@ npm-debug.log*
 shots/
 shots_el/
 *.png.bak
+
+# 打包中间产物
+_tmp_app/
+*.asar

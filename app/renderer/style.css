@@ -95,11 +95,28 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
 @keyframes cin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .card:hover{transform:translateY(-5px);box-shadow:0 0 0 1px rgba(255,255,255,.10),0 20px 46px rgba(0,0,0,.55)}
 .thumb{position:absolute;inset:0;padding:6%;display:grid;place-items:center}
-.thumb img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;
+.thumb::before{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,#F1F1F1 25%,#FAFAFA 50%,#F1F1F1 75%);
+  background-size:200% 100%;animation:shimmer 1.1s linear infinite;
+  transition:opacity .35s;pointer-events:none;
+}
+.thumb.loaded::before{opacity:0;animation:none}
+@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.thumb img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;position:relative;
   transition:opacity .3s,transform .45s cubic-bezier(.2,.7,.3,1);opacity:0}
 .thumb img.loaded{opacity:1}
 .card:hover .thumb img{transform:scale(1.06)}
-.thumb .ph{color:#C2C2C2;font-size:12px;text-align:center;line-height:1.8}
+.thumb .ph{color:#C2C2C2;font-size:12px;text-align:center;line-height:1.8;position:relative}
+
+.price{
+  position:absolute;left:9px;top:9px;z-index:2;
+  background:rgba(14,14,14,.9);color:#fff;
+  font-size:12.5px;font-weight:700;line-height:1;
+  padding:6px 9px;border-radius:7px;
+  font-variant-numeric:tabular-nums;letter-spacing:.2px;
+  box-shadow:0 2px 10px rgba(0,0,0,.2);
+}
 
 .info{
   position:absolute;left:0;right:0;bottom:0;background:#fff;color:#111;
@@ -109,16 +126,22 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
 }
 .card:hover .info{transform:none}
 .info .n{font-size:13px;font-weight:600;line-height:1.4;color:#141414;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.info .m{display:flex;align-items:center;gap:8px;margin-top:5px}
-.info .sku{font-family:Consolas,"Courier New",monospace;font-size:11px;color:#8C8C8C;background:#F4F4F4;border-radius:4px;padding:1px 6px}
-.info .go{margin-left:auto;font-size:11.5px;color:#111;display:flex;align-items:center;gap:3px}
+.info .m{display:flex;align-items:center;gap:7px;margin-top:6px}
+.info .sku{font-family:Consolas,"Courier New",monospace;font-size:11px;color:#8C8C8C;background:#F4F4F4;border-radius:4px;padding:1px 6px;flex:none}
+.info .iact{
+  margin-left:auto;font-size:11px;color:#7A7A7A;background:#F2F2F2;
+  border-radius:5px;padding:2px 8px;transition:.14s;flex:none;
+}
+.info .iact:hover{background:#111;color:#fff}
+.info .go{font-size:11.5px;color:#111;display:flex;align-items:center;gap:3px;flex:none}
 .info .go.no{color:#B5B5B5}
 
 /* 列表 */
 .list{display:block}
 .lhead{display:flex;align-items:center;gap:14px;padding:0 14px 10px;font-size:11.5px;color:#4E4E4E;border-bottom:1px solid #1E1E1E;margin-bottom:10px}
 .lhead .h1{width:44px;flex:none}.lhead .h2{flex:1}
-.lhead .h3{width:80px;flex:none}.lhead .h4{width:90px;flex:none;text-align:right}.lhead .h5{width:40px;flex:none}
+.lhead .h3{width:80px;flex:none}.lhead .h6{width:64px;flex:none;text-align:right}
+.lhead .h4{width:90px;flex:none;text-align:right}.lhead .h5{width:40px;flex:none}
 .row{
   display:flex;align-items:center;gap:14px;padding:8px 14px;background:#111;border:1px solid #1D1D1D;
   border-radius:10px;margin-bottom:6px;cursor:pointer;transition:.14s;
@@ -129,6 +152,7 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
 .row .rn .t{font-size:13px;font-weight:600;color:#E8E8E8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .rn .s{font-size:11px;color:#5A5A5A;font-family:Consolas,monospace;flex:none}
 .row .rc{width:80px;font-size:12px;color:#7A7A7A;flex:none}
+.row .rp{width:64px;flex:none;font-size:12.5px;font-weight:600;color:#E0E0E0;text-align:right;font-variant-numeric:tabular-nums}
 .row .rl{width:90px;flex:none;font-size:12px;text-align:right}
 .row .rl.ok{color:#5FBF8F}.row .rl.no{color:#414141}
 .row .go{opacity:0;transition:.14s;color:#fff;font-size:11.5px;flex:none;width:40px;text-align:right}
@@ -270,7 +294,14 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
 .progress.show{opacity:1}
 .progress .bar{height:100%;width:0%;background:#fff;transition:width .2s}
 .progress .txt{
-  position:fixed;left:50%;top:16px;transform:translateX(-50%);background:#fff;color:#111;
-  font-size:12px;padding:7px 16px;border-radius:999px;font-weight:500;white-space:nowrap;
-  box-shadow:0 8px 30px rgba(0,0,0,.6);
+  position:fixed;left:50%;bottom:46px;transform:translateX(-50%);
+  background:#fff;color:#111;font-size:13px;font-weight:600;
+  padding:13px 24px;border-radius:999px;white-space:nowrap;
+  box-shadow:0 12px 44px rgba(0,0,0,.55);
+  display:flex;align-items:center;gap:11px;
+}
+.progress .txt::before{
+  content:"";width:15px;height:15px;border-radius:50%;
+  border:2px solid #E2E2E2;border-top-color:#111;
+  animation:sp .7s linear infinite;flex:none;
 }

@@ -36,21 +36,76 @@ function norm(s) {
   return String(s || "").trim().toLowerCase().replace(/\.(jpe?g|png|webp|gif|bmp|avif)$/i, "");
 }
 
+/* 图片加载失败：显示占位，而不是一片白 */
+window.imgFail = function (el) {
+  el.style.display = "none";
+  const box = el.parentNode;
+  if (!box || box.querySelector(".ph")) return;
+  const d = document.createElement("div");
+  d.className = "ph";
+  d.innerHTML = '图片损坏<br><span style="font-size:10px;color:#C0C0C0">右键可重新上传</span>';
+  box.appendChild(d);
+};
+
+/* ================= 自动归类规则 ================= */
+const CAT_RULES = [
+  { cat: "数据线", keys: ["数据线", "充电线", "快充线", "usb线", "type-c线", "typec", "lightning", "延长线", "转接头", "otg", "cc线"] },
+  { cat: "充电器", keys: ["充电器", "充电头", "适配器", "快充头", "氮化镓", "无线充", "电源适配", "插头"] },
+  { cat: "充电宝", keys: ["充电宝", "移动电源", "powerbank", "power bank", "应急电源"] },
+  { cat: "蓝牙耳机", keys: ["耳机", "耳麦", "蓝牙耳", "入耳", "半入耳", "骨传导", "airpods", "tws"] },
+  { cat: "音箱", keys: ["音箱", "音响", "喇叭", "扬声器"] },
+  { cat: "手机壳", keys: ["手机壳", "保护壳", "保护套", "皮套", "硅胶壳", "透明壳", "防摔壳"] },
+  { cat: "钢化膜", keys: ["钢化膜", "贴膜", "保护膜", "屏幕膜"] },
+  { cat: "手机支架", keys: ["支架", "托架", "懒人架", "车载架", "指环扣", "磁吸架"] },
+  { cat: "键鼠外设", keys: ["键盘", "鼠标", "键鼠", "手柄"] },
+  { cat: "存储", keys: ["u盘", "移动硬盘", "内存卡", "tf卡", "读卡器", "固态"] },
+  { cat: "小家电", keys: ["风扇", "加湿器", "电煮锅", "榨汁", "净水", "吹风机", "剃须刀"] },
+  { cat: "家居日用", keys: ["收纳", "挂钩", "置物架", "清洁", "抹布", "垃圾桶", "拖鞋", "毛巾"] },
+  { cat: "厨房用品", keys: ["锅", "碗", "杯", "餐具", "刀具", "保鲜", "砧板"] },
+  { cat: "美妆个护", keys: ["面膜", "洗发", "沐浴", "牙刷", "护肤", "香水", "口红"] },
+  { cat: "服饰配件", keys: ["袜", "帽", "手套", "围巾", "腰带", "内衣"] },
+  { cat: "玩具", keys: ["玩具", "积木", "拼图", "模型", "娃娃"] }
+];
+
+function autoCategorize(name) {
+  const s = String(name || "").toLowerCase();
+  if (!s) return "";
+  for (const r of CAT_RULES) {
+    if (r.keys.some(k => s.includes(k))) return r.cat;
+  }
+  return "";
+}
+
+async function autoCategorizeAll() {
+  let n = 0;
+  state.all.forEach(it => {
+    if (!it.cat) {
+      const c = autoCategorize(it.name || it.orig || "");
+      if (c) { it.cat = c; n++; }
+    }
+  });
+  if (n) await window.api.saveItems(state.all);
+  return n;
+}
+
 /* ================= 渲染 ================= */
 function cardHTML(it, idx) {
   const src = imgUrl(it);
   const hasLink = !!(it.url && it.url.trim());
+  const price = String(it.price || "").trim();
   return `<article class="card" data-id="${esc(it.id)}" style="--i:${idx % 24}">
     <div class="thumb">
       ${src
-        ? `<img src="${src}" alt="" loading="lazy" onload="this.classList.add('loaded')" onerror="this.style.display='none'">`
+        ? `<img src="${src}" alt="" loading="lazy" onload="this.classList.add('loaded');this.parentNode.classList.add('loaded')" onerror="imgFail(this)">`
         : `<div class="ph">暂无图片</div>`}
+      ${price ? `<span class="price">${esc(price)}</span>` : ""}
     </div>
     <div class="info">
       <div class="n">${esc(it.name || it.orig || "未命名商品")}</div>
       <div class="m">
         <span class="sku">${esc(it.sku || it.id)}</span>
-        <span class="go ${hasLink ? "" : "no"}">${hasLink ? "打开购买页 ↗" : "未填链接"}</span>
+        <button class="iact" data-act="edit">编辑</button>
+        <span class="go ${hasLink ? "" : "no"}">${hasLink ? "打开 ↗" : "无链接"}</span>
       </div>
     </div>
   </article>`;
@@ -66,6 +121,7 @@ function rowHTML(it) {
       <span class="s">${esc(it.sku || it.id)}</span>
     </div>
     <div class="rc">${esc(it.cat || "未分类")}</div>
+    <div class="rp">${it.price ? esc(it.price) : ""}</div>
     <div class="rl ${hasLink ? "ok" : "no"}">${hasLink ? "已关联" : "无链接"}</div>
     <div class="go">打开 ↗</div>
   </div>`;
@@ -73,7 +129,7 @@ function rowHTML(it) {
 
 const LIST_HEAD = `<div class="lhead">
   <div class="h1"></div><div class="h2">商品名称 / 货号</div>
-  <div class="h3">分类</div><div class="h4">链接</div><div class="h5"></div>
+  <div class="h3">分类</div><div class="h6">价格</div><div class="h4">链接</div><div class="h5"></div>
 </div>`;
 
 function renderMore() {
@@ -137,7 +193,7 @@ function applyFilter() {
     if (state.cat !== "__all__" && (it.cat || "未分类") !== state.cat) return false;
     if (!kw) return true;
     return ((it.name || "") + " " + (it.sku || "") + " " + (it.note || "") + " " +
-      (it.cat || "") + " " + (it.id || "") + " " + (it.orig || ""))
+      (it.cat || "") + " " + (it.id || "") + " " + (it.orig || "") + " " + (it.price || ""))
       .toLowerCase().includes(kw);
   });
   resetRender();
@@ -215,11 +271,14 @@ async function doImportPaths(files) {
   try {
     const r = await window.api.importPaths(files);
     await reload();
+    const autoN = await autoCategorizeAll();
+    if (autoN) await reload();
     showProgress(false);
     state.busy = false;
     let msg = `导入 ${r.added} 张`;
     if (r.skipped) msg += `，跳过 ${r.skipped} 张（已存在或读不了）`;
-    toast(msg, 3200);
+    if (autoN) msg += `，自动归类 ${autoN} 条`;
+    toast(msg, 3600);
   } catch (e) {
     showProgress(false);
     state.busy = false;
@@ -267,6 +326,7 @@ const HEADER_WORDS = [
   ["img", ["图片文件名", "图片名", "图片", "文件名", "主图", "image", "filename", "img", "file"]],
   ["url", ["采购链接", "商品链接", "链接地址", "链接", "采购地址", "地址", "url", "link"]],
   ["sku", ["货号", "编号", "sku", "编码", "款号", "型号", "code"]],
+  ["price", ["价格", "跟卖价", "最低价", "售价", "报价", "单价", "金额", "price", "cost"]],
   ["category", ["分类", "类目", "品类", "category", "cat"]],
   ["name", ["商品名称", "商品名", "产品名称", "名称", "品名", "title", "name"]],
   ["note", ["备注", "说明", "note", "remark", "memo"]]
@@ -329,6 +389,7 @@ async function applyTable(rows) {
     const cat = get(r, "category");
     const sku = get(r, "sku");
     const note = get(r, "note");
+    const price = get(r, "price");
 
     const hit = imgName ? byOrig.get(norm(imgName)) : (name ? byOrig.get(norm(name)) : null);
 
@@ -338,14 +399,17 @@ async function applyTable(rows) {
       if (cat) hit.cat = cat;
       if (sku) hit.sku = sku;
       if (note) hit.note = note;
+      if (price) hit.price = price;
       updated++;
     } else {
+      const finalName = name || (imgName ? imgName.replace(/\.[^.]+$/, "") : "");
       const item = {
         id: "C" + String(++maxSeq).padStart(4, "0"),
         orig: imgName || "",
         img: "", thumb: "",
-        name: name || (imgName ? imgName.replace(/\.[^.]+$/, "") : ""),
-        sku, cat, url, note,
+        name: finalName,
+        sku, url, note, price,
+        cat: cat || autoCategorize(finalName),
         pending: true,
         ts: Date.now()
       };
@@ -357,9 +421,12 @@ async function applyTable(rows) {
 
   await window.api.saveItems(state.all);
   await reload();
+  const autoN = await autoCategorizeAll();
+  if (autoN) await reload();
   let msg = [];
   if (updated) msg.push(`更新 ${updated} 条`);
   if (created) msg.push(`新增 ${created} 条（等图片）`);
+  if (autoN) msg.push(`自动归类 ${autoN} 条`);
   toast("表格导入完成：" + (msg.join("，") || "没有变化"), 3600);
 }
 
@@ -446,6 +513,7 @@ function openEdit(it) {
     : `<span class="none">暂无图片</span>`;
   $("edName").value = it.name || "";
   $("edSku").value = it.sku || "";
+  $("edPrice").value = it.price || "";
   $("edCat").value = it.cat || "";
   $("edUrl").value = it.url || "";
   $("edNote").value = it.note || "";
@@ -458,6 +526,7 @@ $("edSave").addEventListener("click", async () => {
   if (!it) return;
   it.name = $("edName").value.trim();
   it.sku = $("edSku").value.trim();
+  it.price = $("edPrice").value.trim();
   it.cat = $("edCat").value.trim();
   it.url = $("edUrl").value.trim();
   it.note = $("edNote").value.trim();
@@ -485,7 +554,7 @@ $("edPickImg").addEventListener("click", async () => {
   const r = await window.api.pickImages();
   if (!r.ok || !r.files.length) return;
   const rep = await window.api.replaceImage({ id: it.id, src: r.files[0] });
-  if (rep.ok) { await reload(); state.editing = state.all.find(x => x.id === it.id); openEdit(state.editing); toast("图片已更换"); }
+  if (rep.ok) { await reload(); state.editing = state.all.find(x => x.id === it.id); openEdit(state.editing); toast(rep.warn || "图片已更换"); }
   else toast("更换失败：" + (rep.error || ""));
 });
 
@@ -495,7 +564,7 @@ $("edUrlImg").addEventListener("click", async () => {
   const u = prompt("粘贴图片链接（http 开头）：", "");
   if (!u || !/^https?:\/\//i.test(u.trim())) return;
   const rep = await window.api.replaceImage({ id: it.id, url: u.trim() });
-  if (rep.ok) { await reload(); state.editing = state.all.find(x => x.id === it.id); openEdit(state.editing); toast("图片已更换"); }
+  if (rep.ok) { await reload(); state.editing = state.all.find(x => x.id === it.id); openEdit(state.editing); toast(rep.warn || "图片已更换"); }
   else toast("下载失败：" + (rep.error || ""));
 });
 
@@ -595,6 +664,14 @@ grid.addEventListener("click", e => {
   if (!el) return;
   const it = state.all.find(x => x.id === el.dataset.id);
   if (!it) return;
+
+  const act = e.target.closest("[data-act]");
+  if (act && act.dataset.act === "edit") {
+    e.stopPropagation();
+    openEdit(it);
+    return;
+  }
+
   if (it.url && it.url.trim()) {
     window.api.openUrl(it.url);
     toast("已打开 · " + (it.sku || it.name || it.id));

@@ -105,6 +105,44 @@ function importOneFile(srcPath, items, seqRef) {
   return { item };
 }
 
+/* ---------------- 图片有效性校验 ---------------- */
+function isValidImageFile(p) {
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile() || st.size < 200) return false;
+    const buf = Buffer.alloc(16);
+    const fd = fs.openSync(p, "r");
+    fs.readSync(fd, buf, 0, 16, 0);
+    fs.closeSync(fd);
+    const isJpg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isGif = buf.slice(0, 3).toString("ascii") === "GIF";
+    const isWebp = buf.slice(0, 4).toString("ascii") === "RIFF" &&
+      buf.slice(8, 12).toString("ascii") === "WEBP";
+    const isBmp = buf[0] === 0x42 && buf[1] === 0x4d;
+    if (!(isJpg || isPng || isGif || isWebp || isBmp)) return false;
+    const img = nativeImage.createFromPath(p);
+    if (img.isEmpty()) return false;
+    const s = img.getSize();
+    return s.width > 0 && s.height > 0;
+  } catch {
+    return false;
+  }
+}
+
+/* 按文件头判断真实图片格式 */
+function detectImageExt(p) {
+  const buf = Buffer.alloc(12);
+  const fd = fs.openSync(p, "r");
+  fs.readSync(fd, buf, 0, 12, 0);
+  fs.closeSync(fd);
+  if (buf[0] === 0x89 && buf[1] === 0x50) return ".png";
+  if (buf.slice(0, 3).toString("ascii") === "GIF") return ".gif";
+  if (buf.slice(8, 12).toString("ascii") === "WEBP") return ".webp";
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return ".bmp";
+  return ".jpg";
+}
+
 /* ---------------- 下载网络图片 ---------------- */
 function downloadImage(url, dest, depth = 0) {
   return new Promise((resolve, reject) => {
@@ -280,16 +318,10 @@ ipcMain.handle("import-urls", async (e, urls) => {
     const tmp = path.join(IMG_DIR, "_tmp_" + id + ".jpg");
     try {
       await downloadImage(url, tmp);
-      const head = Buffer.alloc(12);
-      const fd = fs.openSync(tmp, "r");
-      fs.readSync(fd, head, 0, 12, 0);
-      fs.closeSync(fd);
-      // 简单格式嗅探
-      let ext = ".jpg";
-      if (head[0] === 0x89 && head[1] === 0x50) ext = ".png";
-      else if (head.slice(0, 3).toString() === "GIF") ext = ".gif";
-      else if (head.slice(8, 12).toString() === "WEBP") ext = ".webp";
-      else if (head[0] === 0x42 && head[1] === 0x4d) ext = ".bmp";
+      if (!isValidImageFile(tmp)) {
+        throw new Error("下载到的不是有效图片（可能碰上了防盗链、需要登录，或链接本身不是图片）");
+      }
+      const ext = detectImageExt(tmp);
 
       const imgName = id + ext;
       const dest = path.join(IMG_DIR, imgName);
@@ -370,31 +402,46 @@ ipcMain.handle("replace-image", async (e, payload) => {
   const it = items.find(x => x.id === id);
   if (!it) return { ok: false, error: "找不到这件商品" };
   try {
-    let imgName = it.img;
+    let newPath = "", newOrig = "", tmpPath = "";
+
     if (src) {
-      const ext = (path.extname(src) || ".jpg").toLowerCase();
-      imgName = id + ext;
-      if (it.img && it.img !== imgName) {
-        const old = path.join(IMG_DIR, it.img);
-        if (fs.existsSync(old)) fs.unlinkSync(old);
-      }
-      fs.copyFileSync(src, path.join(IMG_DIR, imgName));
-      it.orig = path.basename(src);
+      if (!isValidImageFile(src)) return { ok: false, error: "这个文件不是有效图片，或者图片已损坏" };
+      newPath = src;
+      newOrig = path.basename(src);
     } else if (url) {
-      imgName = id + ".jpg";
-      if (it.img && it.img !== imgName) {
-        const old = path.join(IMG_DIR, it.img);
-        if (fs.existsSync(old)) fs.unlinkSync(old);
+      tmpPath = path.join(IMG_DIR, "_tmp_" + id + ".download");
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+      await downloadImage(url, tmpPath);
+      if (!isValidImageFile(tmpPath)) {
+        try { fs.unlinkSync(tmpPath); } catch {}
+        return { ok: false, error: "下载到的不是有效图片（可能防盗链、需要登录，或这个链接根本不是图片）" };
       }
-      await downloadImage(url, path.join(IMG_DIR, imgName));
-      it.orig = "url_" + id + ".jpg";
+      newPath = tmpPath;
+      newOrig = "url_" + id + detectImageExt(tmpPath);
     } else {
       return { ok: false, error: "缺少图片来源" };
     }
+
+    // 全部校验通过，才动原来的文件
+    const ext = detectImageExt(newPath);
+    // 文件名带时间戳：换图后路径变化，避免浏览器拿旧缓存显示坏图
+    const imgName = id + "_" + Date.now().toString(36) + ext;
+    const dest = path.join(IMG_DIR, imgName);
+
+    if (it.img && it.img !== imgName) {
+      const old = path.join(IMG_DIR, it.img);
+      if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch {} }
+    }
+    if (path.resolve(newPath) !== path.resolve(dest)) {
+      fs.copyFileSync(newPath, dest);
+    }
+    if (tmpPath && fs.existsSync(tmpPath)) { try { fs.unlinkSync(tmpPath); } catch {} }
+
     it.img = imgName;
-    it.thumb = makeThumb(path.join(IMG_DIR, imgName), id);
+    it.orig = newOrig;
+    it.thumb = makeThumb(dest, id);
     writeItems(items);
-    return { ok: true };
+    return { ok: true, thumb: it.thumb, warn: it.thumb ? "" : "缩略图生成失败，已改用原图显示" };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -418,10 +465,10 @@ ipcMain.handle("delete-item", (e, it) => {
 
 /* 生成模板表格内容（用 xlsx 写，主进程存到临时目录并返回路径） */
 ipcMain.handle("make-template", async () => {
-  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "备注"];
+  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "价格", "备注"];
   const sample = [
-    ["A001.jpg", "三合一数据线 1米", "https://detail.1688.com/offer/123456789.html", "数据线", "DL-0001", "供应商A"],
-    ["A002.jpg", "20W PD快充头", "https://detail.1688.com/offer/987654321.html", "充电器", "CD-0001", ""]
+    ["A001.jpg", "三合一数据线 1米", "https://detail.1688.com/offer/123456789.html", "数据线", "DL-0001", "20", "供应商A"],
+    ["A002.jpg", "20W PD快充头", "https://detail.1688.com/offer/987654321.html", "充电器", "CD-0001", "15.5", ""]
   ];
   const ws = XLSX.utils.aoa_to_sheet([header, ...sample]);
   ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 24 }];
@@ -440,17 +487,18 @@ ipcMain.handle("make-template", async () => {
 
 /* 导出当前清单 */
 ipcMain.handle("export-list", async (e, items) => {
-  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "备注"];
+  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "价格", "备注"];
   const body = items.map(it => [
     it.orig || it.img || "",
     it.name || "",
     it.url || "",
     it.cat || "",
     it.sku || "",
+    it.price || "",
     it.note || ""
   ]);
   const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
-  ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 24 }];
+  ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 24 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "商品清单");
 
