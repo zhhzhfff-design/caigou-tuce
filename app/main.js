@@ -163,7 +163,7 @@ function httpGet(url, extraHeaders = {}, depth = 0) {
     const lib = u.protocol === "https:" ? https : http;
     const headers = Object.assign({
       "User-Agent": UA,
-      "Accept": "image/webp,image/apng,image/png,image/jpeg,image/*;q=0.9,*/*;q=0.8",
+      "Accept": "image/png,image/jpeg,image/apng,image/*;q=0.9,*/*;q=0.8",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,fr;q=0.7,es;q=0.6,it;q=0.5",
       "Accept-Encoding": "gzip, deflate",
       "Cache-Control": "no-cache"
@@ -223,14 +223,18 @@ function sniffImage(buf) {
 }
 
 /* 图片内容校验：太小或解不开的一律当无效（很多 CDN 用 1x1 占位图冒充成功） */
-function validateImageBuf(buf) {
+function validateImageBuf(buf, ext) {
   if (!buf || buf.length < 1024) {
     return { ok: false, reason: "拿到的图片只有 " + (buf ? buf.length : 0) + " 字节，是网站返回的占位图，不是真图" };
   }
   const img = nativeImage.createFromBuffer(buf);
-  if (img.isEmpty()) return { ok: false, reason: "图片解不开，格式可能不受支持" };
+  if (img.isEmpty()) {
+    // webp 这类格式 Electron 解不了，但浏览器能显示，照样存下来
+    if (ext === ".webp" || ext === ".avif") return { ok: true, width: 0, height: 0, noThumb: true };
+    return { ok: false, reason: "图片解不开，格式可能不受支持" };
+  }
   const { width, height } = img.getSize();
-  if (!width || !height) return { ok: false, reason: "图片尺寸读不出来" };
+  if (!width || !height) return { ok: true, width: 0, height: 0 };
   if (width < 80 || height < 80) {
     return { ok: false, reason: `拿到的图只有 ${width}×${height}，是占位图` };
   }
@@ -352,7 +356,7 @@ async function resolveImage(rawUrl) {
   let ext = sniffImage(res.buf);
   if (ext) {
     if (ext === ".avif") throw new Error("网站给的是 AVIF 格式，程序存不了，换 jpg/png 的图链接");
-    const v = validateImageBuf(res.buf);
+    const v = validateImageBuf(res.buf, ext);
     if (!v.ok) throw new Error(v.reason);
     return { buf: res.buf, ext };
   }
@@ -373,7 +377,7 @@ async function resolveImage(rawUrl) {
       const r2 = await httpGet(c, { Referer: url });
       const e2 = sniffImage(r2.buf);
       if (!e2 || e2 === ".avif") continue;
-      const v = validateImageBuf(r2.buf);
+      const v = validateImageBuf(r2.buf, e2);
       if (!v.ok) continue;
       return { buf: r2.buf, ext: e2 };
     } catch { /* 换下一张 */ }
@@ -614,6 +618,7 @@ ipcMain.handle("import-urls", async (e, urls) => {
         url: "",
         note: url.length > 300 ? url.slice(0, 300) : url,
         sourceUrl: url,
+        imgUrl: url,
         ts: Date.now()
       };
       items.push(item);
@@ -688,7 +693,7 @@ ipcMain.handle("replace-image", async (e, payload) => {
       const buf = Buffer.from(buffer);
       const ext = sniffImage(buf);
       if (!ext) return { ok: false, error: "粘贴的内容不是图片" };
-      const v = validateImageBuf(buf);
+      const v = validateImageBuf(buf, ext);
       if (!v.ok) return { ok: false, error: v.reason };
       newPath = path.join(IMG_DIR, "_tmp_" + id + ext);
       fs.writeFileSync(newPath, buf);
@@ -737,7 +742,7 @@ ipcMain.handle("add-image-buffer", async (e, payload) => {
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const ext = sniffImage(buf);
   if (!ext) return { ok: false, error: "剪贴板里的不是图片" };
-  const v = validateImageBuf(buf);
+  const v = validateImageBuf(buf, ext);
   if (!v.ok) return { ok: false, error: v.reason };
 
   return await withDbLock(() => {
@@ -798,7 +803,8 @@ ipcMain.handle("download-one", async (e, payload) => {
         if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch {} }
       }
       it.img = imgName;
-      it.url = target;
+      if (!it.url) it.url = target;   // 采购链接为空时，先用图片地址顶着
+      it.imgUrl = target;             // 原图下载地址，导出时带上
       it.thumb = th || imgName;
       delete it.pending;
       writeItems(items);
@@ -878,10 +884,25 @@ ipcMain.handle("make-template", async () => {
 });
 
 /* 导出当前清单 */
-ipcMain.handle("export-list", async (e, items) => {
-  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "售价(€)", "成本(¥)", "重量(g)", "备注"];
-  const body = items.map(it => [
-    it.orig || it.img || "",
+/* 导出用的统一表结构：图片链接、本地图片都要带上 */
+const EXPORT_HEADER = [
+  "本地图片", "图片链接", "商品名称", "1688链接", "分类", "货号",
+  "售价(€)", "成本(¥)", "重量(g)", "备注"
+];
+const EXPORT_COLS = [
+  { wch: 22 }, { wch: 46 }, { wch: 34 }, { wch: 46 }, { wch: 12 },
+  { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 22 }
+];
+
+/* 图片链接：优先记下来的原图地址，其次采购链接 */
+function imageLinkOf(it) {
+  return it.imgUrl || it.sourceUrl || "";
+}
+
+function buildExportRow(it, imgDirName) {
+  return [
+    it.img ? (imgDirName ? imgDirName + "/" + it.img : it.img) : "",
+    imageLinkOf(it),
     it.name || "",
     it.url || "",
     it.cat || "",
@@ -890,9 +911,13 @@ ipcMain.handle("export-list", async (e, items) => {
     it.cost || "",
     it.weight || "",
     it.note || ""
-  ]);
-  const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
-  ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 24 }];
+  ];
+}
+
+ipcMain.handle("export-list", async (e, items) => {
+  const body = items.map(it => buildExportRow(it, ""));
+  const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...body]);
+  ws["!cols"] = EXPORT_COLS;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "商品清单");
 
@@ -904,4 +929,82 @@ ipcMain.handle("export-list", async (e, items) => {
   if (r.canceled || !r.filePath) return { ok: false };
   XLSX.writeFile(wb, r.filePath);
   return { ok: true, file: r.filePath };
+});
+
+/* 连图片一起导出：一个文件夹，里面 清单.xlsx + images/ */
+ipcMain.handle("export-pack", async (e, items, opts) => {
+  if (!items || !items.length) return { ok: false, error: "没有商品可导出" };
+
+  const stamp = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const folderName = `采购清单_${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
+
+  let baseDir = (opts && opts.targetDir) || "";
+  if (!baseDir) {
+    const pick = await dialog.showOpenDialog(mainWin, {
+      title: "选择导出到哪个文件夹",
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: app.getPath("desktop")
+    });
+    if (pick.canceled || !pick.filePaths.length) return { ok: false };
+    baseDir = pick.filePaths[0];
+  }
+
+  const outRoot = path.join(baseDir, folderName);
+  const imgOut = path.join(outRoot, "images");
+  fs.mkdirSync(imgOut, { recursive: true });
+
+  let copied = 0, missing = 0, bytes = 0;
+  const total = items.length;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.img) {
+      const src = path.join(IMG_DIR, it.img);
+      if (fs.existsSync(src)) {
+        const dst = path.join(imgOut, it.img);
+        try {
+          fs.copyFileSync(src, dst);
+          copied++;
+          bytes += fs.statSync(dst).size;
+        } catch { missing++; }
+      } else missing++;
+    }
+    if (i % 5 === 0 || i === total - 1) {
+      mainWin.webContents.send("import-progress", {
+        phase: "export", done: i + 1, total, text: `导出图片 ${i + 1}/${total}`
+      });
+    }
+  }
+
+  const body = items.map(it => buildExportRow(it, "images"));
+  const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...body]);
+  ws["!cols"] = EXPORT_COLS;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "商品清单");
+
+  // 第二页：说明
+  const info = [
+    ["导出时间", stamp.toLocaleString("zh-CN")],
+    ["商品数量", items.length],
+    ["图片数量", copied],
+    ["缺失图片", missing],
+    ["", ""],
+    ["说明", "images 文件夹里是真实图片，和第一列文件名一一对应"],
+    ["说明", "第二列是每张图的原始下载地址，可以直接复制到浏览器打开"]
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(info);
+  ws2["!cols"] = [{ wch: 14 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, ws2, "导出说明");
+
+  const xlsxPath = path.join(outRoot, "清单.xlsx");
+  XLSX.writeFile(wb, xlsxPath);
+
+  return {
+    ok: true,
+    dir: outRoot,
+    xlsx: xlsxPath,
+    copied,
+    missing,
+    mb: +(bytes / 1024 / 1024).toFixed(1)
+  };
 });

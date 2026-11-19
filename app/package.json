@@ -1,6 +1,6 @@
 {
   "name": "caigou-tuce",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "商品采购图册 — 点图即达的本地采购工具",
   "main": "main.js",
   "author": "张聪聪",

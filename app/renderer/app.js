@@ -96,6 +96,18 @@ function fmtWeight(w) {
   return Math.round(n) + "g";
 }
 
+/* 清洗商品名：过滤「3个起批」这类备注和自动生成的文件名 */
+const NOISE_NAME = /^(?:\d+\s*个?起批|起批|包邮|现货|一件代发|混批|批发|量大从优|支持定制)[，,。\s]*$/;
+
+function cleanName(v) {
+  const t = String(v || "").trim();
+  if (!t) return "";
+  if (NOISE_NAME.test(t)) return "";
+  if (/^ex_[A-Za-z0-9]+$/i.test(t)) return "";      // 嵌入图的临时文件名
+  if (/^[A-Za-z0-9_\-]+\.(?:jpe?g|png|webp|gif)$/i.test(t)) return "";  // 纯文件名
+  return t;
+}
+
 /* 长标题截短：优先取第一个逗号前的部分 */
 function shortTitle(t) {
   const s = String(t || "").trim();
@@ -368,7 +380,9 @@ $("urlGo").addEventListener("click", async () => {
 
 /* ---------- 表格导入 ---------- */
 const HEADER_WORDS = [
-  ["img", ["图片文件名", "图片名", "图片", "文件名", "主图", "image", "filename", "img", "file"]],
+  // imgUrl 必须排在 img 前面，否则「图片链接」会被「图片」抢先匹配
+  ["imgUrl", ["图片链接", "图片地址", "图片url", "imgurl", "imageurl", "原图地址", "原图链接"]],
+  ["img", ["图片文件名", "图片名", "本地图片", "图片", "照片", "主图", "文件名", "image", "filename", "img", "file"]],
   ["url", ["采购链接", "商品链接", "链接地址", "链接", "采购地址", "地址", "url", "link"]],
   ["sku", ["货号", "编号", "sku", "编码", "款号", "型号", "code"]],
   ["cost", ["价格(¥)", "价格(元)", "采购价", "成本价", "进价", "1688价格", "成本", "人民币", "cost"]],
@@ -418,10 +432,16 @@ async function applyTable(rows, images) {
   const get = (r, k) => (col[k] !== undefined && r[col[k]] !== undefined ? String(r[col[k]]).trim() : "");
 
   const byOrig = new Map();
+  const byCombo = new Map();   // 「链接 + 图片」组合键，同一链接下多个商品不会被吞掉
+  const comboKey = (u, im) => (u && im ? norm(u) + "||" + norm(im) : "");
   state.all.forEach(it => {
     if (it.orig) byOrig.set(norm(it.orig), it);
     if (it.name) byOrig.set(norm(it.name), it);
     if (it.img) byOrig.set(norm(it.img), it);
+    const k1 = comboKey(it.url, it.img);
+    const k2 = comboKey(it.url, it.imgUrl);
+    if (k1) byCombo.set(k1, it);
+    if (k2) byCombo.set(k2, it);
   });
 
   let maxSeq = 0;
@@ -439,16 +459,30 @@ async function applyTable(rows, images) {
     const rawImg = get(r, "img");
     let embedded = null;
     let imgName = rawImg;
+    let cellImgUrl = "";   // 照片列里填的直接是图片地址
+
     // 整行扫一遍找嵌入图片标记（表格里可能没有"图片"这一列）
     for (let ci = 0; ci < r.length; ci++) {
       const cellV = String(r[ci] == null ? "" : r[ci]);
       const tag = /^__IMG__:(ID_[A-Za-z0-9]+)$/.exec(cellV);
       if (tag) { embedded = images[tag[1]] || null; break; }
+      // 只在「照片/图片」列里找，别把 1688 商品页链接当图片
+      const inImgCol = col.img !== undefined ? ci === col.img : true;
+      if (!cellImgUrl && inImgCol && /^https?:\/\//i.test(cellV)) {
+        const looksImg = /\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(cellV) ||
+                         /\/(mkp|img|image|images|photo|photos|media|pic|picture)\//i.test(cellV);
+        const isPage = /\.html?($|\?)/i.test(cellV) || /\/offer\//i.test(cellV) || /\/produits?\//i.test(cellV);
+        if (looksImg && !isPage) cellImgUrl = cellV;
+      }
     }
     const imTag = /^__IMG__:(ID_[A-Za-z0-9]+)$/.exec(rawImg);
     if (imTag) {
       if (!embedded) embedded = images[imTag[1]] || null;
       imgName = embedded ? embedded.file : "";
+    } else if (/^https?:\/\//i.test(rawImg)) {
+      // 照片列写的是图片地址，不是文件名
+      cellImgUrl = rawImg;
+      imgName = "";
     }
     const name = get(r, "name");
     const url = get(r, "url");
@@ -457,6 +491,8 @@ async function applyTable(rows, images) {
     const note = get(r, "note");
     const price = get(r, "price");
     const cost = get(r, "cost");
+    let imgUrl = get(r, "imgUrl");
+    if (!imgUrl && cellImgUrl) imgUrl = cellImgUrl;
     let weight = get(r, "weight");
     // 如果重量列的单位是 KG，统一换算成克
     if (weight && col.weight !== undefined) {
@@ -467,10 +503,18 @@ async function applyTable(rows, images) {
       }
     }
 
-    const hit = imgName ? byOrig.get(norm(imgName)) : (name ? byOrig.get(norm(name)) : null);
+    // 依次用 文件名 / 商品名 / 链接+图片 认人，避免重复建条目
+    const rowImg = embedded ? embedded.file : (imgUrl || "");
+    const combo = comboKey(url, rowImg);
+    const hit = (imgName ? byOrig.get(norm(imgName)) : null)
+             || (name ? byOrig.get(norm(name)) : null)
+             || (combo ? byCombo.get(combo) : null)
+             || null;
 
     if (hit) {
-      if (name) hit.name = name;
+      const cleanN = cleanName(name);
+      if (cleanN) hit.name = cleanN;
+      else if (hit.name && !cleanName(hit.name)) hit.name = "";
       if (url) hit.url = url;
       if (cat) hit.cat = cat;
       if (sku) hit.sku = sku;
@@ -478,25 +522,30 @@ async function applyTable(rows, images) {
       if (price) hit.price = price;
       if (cost) hit.cost = cost;
       if (weight) hit.weight = weight;
+      if (imgUrl) hit.imgUrl = imgUrl;
       if (embedded && !hit.img) { hit.img = embedded.file; hit.thumb = embedded.thumb; delete hit.pending; updatedWithImg++; }
-      if (!hit.name && embedded && embedded.title) hit.name = shortTitle(embedded.title);
+      if (!hit.name && embedded && embedded.title) hit.name = shortTitle(cleanName(embedded.title));
       touched.add(hit.id);
       updated++;
     } else {
-      const finalName = shortTitle(name || (embedded && embedded.title) || (imgName ? imgName.replace(/\.[^.]+$/, "") : "")) || sku || "";
+      const finalName = shortTitle(cleanName(name) || cleanName(embedded && embedded.title) || "") || "";
       const item = {
         id: "C" + String(++maxSeq).padStart(4, "0"),
         orig: imgName || "",
         img: embedded ? embedded.file : "",
         thumb: embedded ? embedded.thumb : "",
         name: finalName,
-        sku, url, note, price, cost, weight,
+        sku, url, note, price, cost, weight, imgUrl,
         cat: cat || autoCategorize(finalName),
         pending: !embedded,
         ts: Date.now()
       };
       state.all.push(item);
       if (imgName) byOrig.set(norm(imgName), item);
+      const nk1 = comboKey(item.url, item.img);
+      const nk2 = comboKey(item.url, item.imgUrl);
+      if (nk1) byCombo.set(nk1, item);
+      if (nk2) byCombo.set(nk2, item);
       touched.add(item.id);
       created++;
       if (embedded) createdWithImg++;
@@ -507,7 +556,7 @@ async function applyTable(rows, images) {
   await reload();
 
   // 表格里只有链接、没有图片的，自动去下载
-  const need = state.all.filter(x => touched.has(x.id) && x.url && !x.img);
+  const need = state.all.filter(x => touched.has(x.id) && (x.imgUrl || x.url) && !x.img);
   let dl = { ok: 0, fail: [] };
   if (need.length) {
     closePanels();
@@ -541,7 +590,7 @@ async function fetchMissingImages(list) {
       if (i >= total) break;
       const t = list[i];
       let r;
-      try { r = await window.api.downloadOne({ id: t.id, url: t.url }); }
+      try { r = await window.api.downloadOne({ id: t.id, url: t.imgUrl || t.url }); }
       catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
       if (r && r.ok) ok++;
       else fail.push({ name: t.name || t.sku || t.id, url: t.url, error: (r && r.error) || "未知原因" });
@@ -600,6 +649,45 @@ $("optExport").addEventListener("click", async () => {
   if (!state.all.length) return toast("还没有商品可导出");
   const r = await window.api.exportList(state.all);
   if (r.ok) toast("已导出：" + r.file, 4000);
+});
+
+$("optExportPack").addEventListener("click", async () => {
+  if (!state.all.length) return toast("还没有商品可导出");
+  closePanels();
+  showProgress(true, "正在导出图片和清单…", 2);
+  try {
+    const r = await window.api.exportPack(state.all);
+    showProgress(false);
+    if (!r.ok) {
+      if (r.error) toast("导出失败：" + r.error, 4000);
+      return;
+    }
+    let msg = `导出完成：${r.copied} 张图`;
+    if (r.missing) msg += `，${r.missing} 张找不到文件`;
+    toast(msg + "，共 " + r.mb + " MB", 5000);
+    state.lastExportDir = r.dir;
+    const box = $("dlFail");
+    if (box) {
+      box.innerHTML = `
+        <div class="dfl">
+          <b>导出完成</b>
+          <p>文件夹里有两个东西：<br>
+          · <b>清单.xlsx</b> —— 商品信息，第一列是图片文件名，第二列是图片原始链接<br>
+          · <b>images\</b> —— ${r.copied} 张真实图片，文件名和表格一一对应</p>
+          <div class="dfitems"><div class="dfi"><span class="dfn">${esc(r.dir)}</span></div></div>
+          <div class="dfbtns">
+            <button class="btn" id="dfOpen">打开文件夹</button>
+            <button class="btn pri" data-close>知道了</button>
+          </div>
+        </div>`;
+      openPanel("dlFail");
+      const ob = $("dfOpen");
+      if (ob) ob.addEventListener("click", () => window.api.openUrl("file:///" + r.dir.replace(/\\/g, "/")));
+    }
+  } catch (err) {
+    showProgress(false);
+    toast("导出出错：" + err.message, 4500);
+  }
 });
 
 $("optOpenDir").addEventListener("click", () => window.api.openDataDir());

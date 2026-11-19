@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("api", {
   readTableFile: p => ipcRenderer.invoke("read-table-file", p),
   makeTemplate: () => ipcRenderer.invoke("make-template"),
   exportList: items => ipcRenderer.invoke("export-list", items),
+  exportPack: (items, opts) => ipcRenderer.invoke("export-pack", items, opts),
 
   replaceImage: payload => ipcRenderer.invoke("replace-image", payload),
   downloadOne: payload => ipcRenderer.invoke("download-one", payload),

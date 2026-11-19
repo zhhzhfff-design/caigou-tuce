@@ -32,3 +32,9 @@ shots_el/
 # 打包中间产物
 _tmp_app/
 *.asar
+
+# 测试导出的临时目录
+_test_export/
+
+# 调试截图
+_*.png
