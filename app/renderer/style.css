@@ -71,12 +71,13 @@ img{display:block;-webkit-user-drag:none}
   background:linear-gradient(to right,transparent,var(--bg) 60%);
 }
 .zoomwrap svg{color:#4E4E4E;flex:none}
-input[type=range]{-webkit-appearance:none;width:80px;background:transparent;cursor:pointer}
-input[type=range]::-webkit-slider-runnable-track{height:2px;background:#2E2E2E;border-radius:2px}
+input[type=range]{-webkit-appearance:none;width:120px;height:22px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:5px;background:#2E2E2E;border-radius:3px}
 input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:#fff;margin-top:-4.5px;transition:.14s;
+  -webkit-appearance:none;width:17px;height:17px;border-radius:50%;background:#fff;margin-top:-6px;
+  border:2px solid #0A0A0A;box-shadow:0 1px 6px rgba(0,0,0,.35);transition:.14s;
 }
-input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15)}
 
 /* ================= 主区 ================= */
 .main{height:calc(100vh - 126px);overflow-y:auto;padding:10px 32px 90px}
@@ -90,19 +91,25 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
 .card{
   position:relative;aspect-ratio:4/3;background:#fff;border-radius:14px;overflow:hidden;
   cursor:pointer;transition:transform .22s cubic-bezier(.4,0,.2,1),box-shadow .22s;
-  animation:cin .38s cubic-bezier(.2,.7,.3,1) backwards;animation-delay:calc(var(--i,0) * 8ms);
+  /* 屏幕外的卡片浏览器直接跳过排版与绘制，滚动才不卡 */
+  content-visibility:auto;
+  contain-intrinsic-size:auto 260px;
+  /* 入场动画延迟压到最多 120ms，否则一批 60 张要等半秒才显示完 */
+  animation:cin .3s cubic-bezier(.2,.7,.3,1) backwards;
+  animation-delay:calc(min(var(--i,0), 12) * 10ms);
 }
 @keyframes cin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .card:hover{transform:translateY(-5px);box-shadow:0 0 0 1px rgba(255,255,255,.10),0 20px 46px rgba(0,0,0,.55)}
 .thumb{position:absolute;inset:0;padding:6%;display:grid;place-items:center}
 .thumb::before{
   content:"";position:absolute;inset:0;
-  background:linear-gradient(90deg,#F1F1F1 25%,#FAFAFA 50%,#F1F1F1 75%);
-  background-size:200% 100%;animation:shimmer 1.1s linear infinite;
-  transition:opacity .35s;pointer-events:none;
+  background:linear-gradient(160deg,#F4F4F4 0%,#EDEDED 55%,#F4F4F4 100%);
+  /* 只动 opacity，交给合成层处理；改 background-position 会让每张卡反复重绘 */
+  animation:pulse 1.6s ease-in-out infinite;
+  transition:opacity .3s;pointer-events:none;
 }
 .thumb.loaded::before{opacity:0;animation:none}
-@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.62}}
 .thumb img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;position:relative;
   transition:opacity .3s,transform .45s cubic-bezier(.2,.7,.3,1);opacity:0}
 .thumb img.loaded{opacity:1}
@@ -565,3 +572,38 @@ body::after{
 body[data-theme] .panel{ z-index:9999; }
 body[data-theme] .ctx{ z-index:9999; }
 body[data-theme] .toast{ z-index:9999; }
+
+/* ================= 下载失败明细 ================= */
+#dlFail .pb{ display:none; }
+.dfl{ padding:4px 24px 22px; }
+.dfl b{ font-size:14px; color:var(--txt); display:block; margin-bottom:8px; }
+.dfl p{ font-size:12px; color:var(--txt2); line-height:1.85; margin-bottom:14px; }
+.dfitems{
+  max-height:300px; overflow-y:auto; border:1px solid var(--line);
+  border-radius:10px; background:var(--panel3); padding:4px;
+}
+.dfitems::-webkit-scrollbar{ width:8px; }
+.dfitems::-webkit-scrollbar-thumb{ background:var(--line2); border-radius:4px; }
+.dfi{
+  display:flex; gap:10px; align-items:baseline; padding:7px 10px;
+  border-bottom:1px solid var(--line); font-size:11.5px;
+}
+.dfi:last-child{ border-bottom:none; }
+.dfn{ color:var(--txt); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dfe{ color:#E07070; flex:none; max-width:260px; text-align:right; font-size:11px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dfbtns{ display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
+
+/* ================= 链接使用提示 ================= */
+.tipbox{ background:var(--panel3); border:1px solid var(--line); border-radius:11px; padding:13px 15px; margin-top:14px; }
+.tip-h{ font-size:12px; font-weight:700; color:var(--txt); margin-bottom:9px; }
+.tip-r{ font-size:11.5px; color:var(--txt2); line-height:1.95; display:flex; gap:6px; align-items:baseline; }
+.tip-r .ok{ color:#3FBF6F; font-weight:700; flex:none; }
+.tip-r .no{ color:#E07070; font-weight:700; flex:none; }
+.tipbox code{ background:var(--panel2); padding:1px 5px; border-radius:4px; font-size:11px;
+  font-family:Consolas,monospace; color:var(--txt); }
+.tip-warn{ margin-top:11px; padding-top:11px; border-top:1px dashed var(--line);
+  font-size:11.5px; color:var(--txt2); line-height:1.95; }
+.tip-warn b{ color:#E0A030; }
+.tip-warn kbd{ background:var(--panel); border:1px solid var(--line2); border-bottom-width:2px;
+  border-radius:4px; padding:0 4px; font-size:10.5px; font-family:Consolas,monospace; color:var(--txt); }

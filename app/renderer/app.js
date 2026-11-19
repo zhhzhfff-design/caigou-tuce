@@ -1,7 +1,7 @@
 "use strict";
 
 /* ================= 状态 ================= */
-const PAGE = 60;
+const PAGE = 40;
 const state = {
   all: [], view: [], rendered: 0,
   cat: "__all__", kw: "", mode: "grid", thumb: 300,
@@ -431,6 +431,7 @@ async function applyTable(rows, images) {
   });
 
   let updated = 0, created = 0, createdWithImg = 0, updatedWithImg = 0;
+  const touched = new Set();
   for (let i = start; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r.some(c => String(c || "").trim() !== "")) continue;
@@ -479,6 +480,7 @@ async function applyTable(rows, images) {
       if (weight) hit.weight = weight;
       if (embedded && !hit.img) { hit.img = embedded.file; hit.thumb = embedded.thumb; delete hit.pending; updatedWithImg++; }
       if (!hit.name && embedded && embedded.title) hit.name = shortTitle(embedded.title);
+      touched.add(hit.id);
       updated++;
     } else {
       const finalName = shortTitle(name || (embedded && embedded.title) || (imgName ? imgName.replace(/\.[^.]+$/, "") : "")) || sku || "";
@@ -495,6 +497,7 @@ async function applyTable(rows, images) {
       };
       state.all.push(item);
       if (imgName) byOrig.set(norm(imgName), item);
+      touched.add(item.id);
       created++;
       if (embedded) createdWithImg++;
     }
@@ -502,13 +505,83 @@ async function applyTable(rows, images) {
 
   await window.api.saveItems(state.all);
   await reload();
+
+  // 表格里只有链接、没有图片的，自动去下载
+  const need = state.all.filter(x => touched.has(x.id) && x.url && !x.img);
+  let dl = { ok: 0, fail: [] };
+  if (need.length) {
+    closePanels();
+    dl = await fetchMissingImages(need);
+    await reload();
+  }
+
   const autoN = await autoCategorizeAll();
   if (autoN) await reload();
+
   let msg = [];
   if (updated) msg.push(`更新 ${updated} 条`);
-  if (created) msg.push(createdWithImg ? `新增 ${created} 条（含 ${createdWithImg} 张图）` : `新增 ${created} 条（等图片）`);
+  if (created) msg.push(createdWithImg ? `新增 ${created} 条（含 ${createdWithImg} 张图）` : `新增 ${created} 条`);
+  if (dl.ok) msg.push(`按链接下载 ${dl.ok} 张图`);
   if (autoN) msg.push(`自动归类 ${autoN} 条`);
   toast("表格导入完成：" + (msg.join("，") || "没有变化"), 3600);
+
+  if (dl.fail.length) showDlFail(dl.fail);
+}
+
+/* 表格导入后按链接批量补图：并发 3，带进度 */
+async function fetchMissingImages(list) {
+  const total = list.length;
+  let done = 0, ok = 0, idx = 0;
+  const fail = [];
+  showProgress(true, `正在按链接下载图片 0/${total}`, 0);
+
+  async function worker() {
+    while (true) {
+      const i = idx++;
+      if (i >= total) break;
+      const t = list[i];
+      let r;
+      try { r = await window.api.downloadOne({ id: t.id, url: t.url }); }
+      catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+      if (r && r.ok) ok++;
+      else fail.push({ name: t.name || t.sku || t.id, url: t.url, error: (r && r.error) || "未知原因" });
+      done++;
+      showProgress(true, `正在按链接下载图片 ${done}/${total}`, Math.round(done / total * 100));
+    }
+  }
+
+  const workers = [];
+  for (let k = 0; k < Math.min(3, total); k++) workers.push(worker());
+  await Promise.all(workers);
+  showProgress(false);
+  return { ok, fail };
+}
+
+/* 下载失败的明细弹窗 */
+let lastDlFail = [];
+function showDlFail(list) {
+  lastDlFail = list;
+  const box = $("dlFail");
+  if (!box) return;
+  box.innerHTML = `
+    <div class="dfl">
+      <b>有 ${list.length} 张图没下载成功</b>
+      <p>常见原因：链接是商品页被反爬拦了、需要登录、或者那张图本身有防盗链。<br>
+      可以点下面的「复制失败链接」，去浏览器里打开页面手动右键存图，再拖进程序。</p>
+      <div class="dfitems">${list.slice(0, 40).map(x =>
+        `<div class="dfi"><span class="dfn">${esc(x.name)}</span><span class="dfe">${esc(x.error)}</span></div>`
+      ).join("")}${list.length > 40 ? `<div class="dfi"><span class="dfn">…还有 ${list.length - 40} 条</span></div>` : ""}</div>
+      <div class="dfbtns">
+        <button class="btn" id="dfCopy">复制失败链接</button>
+        <button class="btn pri" data-close>知道了</button>
+      </div>
+    </div>`;
+  openPanel("dlFail");
+  const c = $("dfCopy");
+  if (c) c.addEventListener("click", () => {
+    const txt = lastDlFail.map(x => x.url).join("\n");
+    navigator.clipboard.writeText(txt).then(() => toast("已复制 " + lastDlFail.length + " 个链接"));
+  });
 }
 
 $("optTable").addEventListener("click", async () => {
@@ -627,10 +700,8 @@ $("edDel").addEventListener("click", async () => {
   const it = state.editing;
   if (!it) return;
   if (!confirm(`确定删除「${it.name || it.orig || it.id}」？\n图片文件也会一起删掉，不可恢复。`)) return;
-  await window.api.deleteItem(it);
-  await reload();
+  await deleteItems([it], "已删除 1 件");
   closePanels();
-  toast("已删除");
 });
 
 $("edPickImg").addEventListener("click", async () => {
@@ -689,12 +760,89 @@ $("ctx").addEventListener("click", async e => {
     else toast("还没填采购链接");
   } else if (b.dataset.act === "del") {
     if (confirm(`确定删除「${it.name || it.orig || it.id}」？`)) {
-      await window.api.deleteItem(it);
-      await reload();
-      toast("已删除");
+      await deleteItems([it], "已删除 1 件");
     }
   }
 });
+
+/* ================= 粘贴图片 ================= */
+/* 反爬网站（1688、乐华梅兰）抓不到图时，截图或右键复制图片，直接 Ctrl+V */
+document.addEventListener("paste", async e => {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  const blobs = [];
+  for (const item of dt.items || []) {
+    if (item.kind === "file" && /^image\//.test(item.type)) {
+      const f = item.getAsFile();
+      if (f) blobs.push(f);
+    }
+  }
+  if (!blobs.length) return;
+  e.preventDefault();
+
+  // 编辑面板开着 → 替换当前商品的图
+  if ($("editPanel").classList.contains("show") && state.editing) {
+    const buf = await blobs[0].arrayBuffer();
+    const r = await window.api.replaceImage({ id: state.editing.id, buffer: Array.from(new Uint8Array(buf)) });
+    if (r && r.ok) {
+      await reload();
+      state.editing = state.all.find(x => x.id === state.editing.id);
+      openEdit(state.editing);
+      toast("图片已替换");
+    } else {
+      toast("替换失败：" + ((r && r.error) || "未知原因"), 4000);
+    }
+    return;
+  }
+
+  // 否则当作新商品加进来
+  showProgress(true, `正在加入 ${blobs.length} 张图片…`, 10);
+  let okN = 0;
+  for (const f of blobs) {
+    const buf = await f.arrayBuffer();
+    const r = await window.api.addImageBuffer({ data: Array.from(new Uint8Array(buf)) });
+    if (r && r.ok) okN++;
+  }
+  await reload();
+  const autoN = await autoCategorizeAll();
+  if (autoN) await reload();
+  showProgress(false);
+  toast(okN ? `已加入 ${okN} 张图片${autoN ? "，自动归类 " + autoN + " 条" : ""}` : "没加进来", 3200);
+});
+
+/* ================= 删除（保持视角不跳） ================= */
+/* 直接从列表和 DOM 里摘掉，不整页重建，滚动位置原样保留 */
+function dropFromView(ids) {
+  const set = new Set(ids);
+  if (!set.size) return;
+
+  const top = scroller.scrollTop;
+  let removedInDom = 0;
+  grid.querySelectorAll("[data-id]").forEach(el => {
+    if (set.has(el.dataset.id)) { el.remove(); removedInDom++; }
+  });
+
+  state.all = state.all.filter(x => !set.has(x.id));
+  state.view = state.view.filter(x => !set.has(x.id));
+  state.rendered = Math.max(0, state.rendered - removedInDom);
+
+  if (!state.view.length) {
+    resetRender();
+    return;
+  }
+  renderPills();
+  updateCount();
+  // 恢复原视角（浏览器可能因内容变短做过钳制，这里再压回原值）
+  scroller.scrollTop = Math.min(top, scroller.scrollHeight);
+}
+
+async function deleteItems(list, tip) {
+  const ids = list.map(x => x.id);
+  if (!ids.length) return;
+  await window.api.deleteMany(ids);
+  dropFromView(ids);
+  toast(tip || `已删除 ${ids.length} 件`, 2400);
+}
 
 /* ================= 主题与亮度 ================= */
 const THEMES = [
@@ -782,20 +930,29 @@ function toggleSelectMode(on) {
   const canZoom = !on && state.mode === "grid";
   $("zoomWrap").style.opacity = canZoom ? "1" : ".25";
   $("zoomWrap").style.pointerEvents = canZoom ? "auto" : "none";
-  resetRender();
-  updateSelBar();
+  syncPicks();
 }
 
 $("btnSelect").addEventListener("click", () => toggleSelectMode(!state.selectMode));
 $("selCancel").addEventListener("click", () => toggleSelectMode(false));
+
+/* 就地刷新勾选状态，不重建卡片（大批量时快得多，也不跳位置） */
+function syncPicks() {
+  grid.querySelectorAll("[data-id]").forEach(el => {
+    const on = state.selected.has(el.dataset.id);
+    el.classList.toggle("picked", on);
+    const ck = el.querySelector(".ck");
+    if (ck) ck.innerHTML = on ? CHECK_SVG : "";
+  });
+  updateSelBar();
+}
 
 $("selAll").addEventListener("click", () => {
   if (!state.view.length) return;
   const allPicked = state.view.every(it => state.selected.has(it.id));
   if (allPicked) state.view.forEach(it => state.selected.delete(it.id));
   else state.view.forEach(it => state.selected.add(it.id));
-  resetRender();
-  updateSelBar();
+  syncPicks();
 });
 
 $("selInv").addEventListener("click", () => {
@@ -804,8 +961,7 @@ $("selInv").addEventListener("click", () => {
     if (state.selected.has(it.id)) state.selected.delete(it.id);
     else state.selected.add(it.id);
   });
-  resetRender();
-  updateSelBar();
+  syncPicks();
 });
 
 $("selDel").addEventListener("click", async () => {
@@ -813,12 +969,13 @@ $("selDel").addEventListener("click", async () => {
   if (!n) return toast("还没选东西呢");
   if (!confirm(`确定删除选中的 ${n} 件商品？\n\n对应的图片和缩略图会一起删掉，不能恢复。`)) return;
   const ids = [...state.selected];
+  const picked = state.all.filter(x => state.selected.has(x.id));
   $("selDel").textContent = "删除中…";
   await window.api.deleteMany(ids);
   $("selDel").textContent = "删除选中";
   state.selected.clear();
   toggleSelectMode(false);
-  await reload();
+  dropFromView(ids);
   toast(`已删除 ${n} 件商品`, 2600);
 });
 
@@ -885,8 +1042,7 @@ grid.addEventListener("click", e => {
     if (e.shiftKey && lastPickIdx >= 0 && idx >= 0) {
       const a = Math.min(lastPickIdx, idx), b = Math.max(lastPickIdx, idx);
       for (let i = a; i <= b; i++) state.selected.add(state.view[i].id);
-      resetRender();
-      updateSelBar();
+      syncPicks();
     } else {
       togglePick(it, el);
     }
@@ -989,7 +1145,7 @@ document.addEventListener("keydown", e => {
 
 const io = new IntersectionObserver(entries => {
   if (entries[0].isIntersecting) renderMore();
-}, { root: scroller, rootMargin: "700px" });
+}, { root: scroller, rootMargin: "500px" });
 io.observe(sentinel);
 
 /* ================= 启动 ================= */

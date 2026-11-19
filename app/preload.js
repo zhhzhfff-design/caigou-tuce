@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("api", {
   exportList: items => ipcRenderer.invoke("export-list", items),
 
   replaceImage: payload => ipcRenderer.invoke("replace-image", payload),
+  downloadOne: payload => ipcRenderer.invoke("download-one", payload),
+  addImageBuffer: payload => ipcRenderer.invoke("add-image-buffer", payload),
   getPathForFile: file => {
     try { return webUtils.getPathForFile(file); } catch { return ""; }
   },

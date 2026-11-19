@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
+const zlib = require("zlib");
 const XLSX = require("xlsx");
 
 let mainWin = null;
@@ -23,6 +24,14 @@ function initDirs() {
 }
 
 /* ---------------- 数据读写 ---------------- */
+/* items.json 的读-改-写必须串行，否则并发下载会互相覆盖对方的结果 */
+let DB_LOCK = Promise.resolve();
+function withDbLock(fn) {
+  const run = DB_LOCK.then(fn, fn);
+  DB_LOCK = run.then(() => {}, () => {});
+  return run;
+}
+
 function readItems() {
   try {
     const raw = fs.readFileSync(ITEMS_FILE, "utf8");
@@ -143,38 +152,240 @@ function detectImageExt(p) {
   return ".jpg";
 }
 
-/* ---------------- 下载网络图片 ---------------- */
-function downloadImage(url, dest, depth = 0) {
+/* ---------------- 网络请求：带解压、带浏览器头 ---------------- */
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+function httpGet(url, extraHeaders = {}, depth = 0) {
   return new Promise((resolve, reject) => {
-    if (depth > 4) return reject(new Error("重定向过多"));
+    if (depth > 6) return reject(new Error("重定向太多次"));
     let u;
     try { u = new URL(url); } catch { return reject(new Error("链接格式不对")); }
     const lib = u.protocol === "https:" ? https : http;
-    const req = lib.get(u, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Referer": u.origin + "/",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
-      },
-      timeout: 25000
-    }, res => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+    const headers = Object.assign({
+      "User-Agent": UA,
+      "Accept": "image/webp,image/apng,image/png,image/jpeg,image/*;q=0.9,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,fr;q=0.7,es;q=0.6,it;q=0.5",
+      "Accept-Encoding": "gzip, deflate",
+      "Cache-Control": "no-cache"
+    }, extraHeaders);
+
+    const req = lib.get(u, { headers, timeout: 22000 }, res => {
+      const code = res.statusCode;
+      if (code >= 300 && code < 400 && res.headers.location) {
         res.resume();
-        const next = new URL(res.headers.location, u).toString();
-        return downloadImage(next, dest, depth + 1).then(resolve, reject);
+        let next;
+        try { next = new URL(res.headers.location, u).toString(); } catch { return reject(new Error("跳转地址异常")); }
+        return httpGet(next, extraHeaders, depth + 1).then(resolve, reject);
       }
-      if (res.statusCode !== 200) {
+      if (code !== 200) {
         res.resume();
-        return reject(new Error("HTTP " + res.statusCode));
+        const e = new Error("HTTP " + code);
+        e.status = code;
+        return reject(e);
       }
-      const ws = fs.createWriteStream(dest);
-      res.pipe(ws);
-      ws.on("finish", () => ws.close(() => resolve(dest)));
-      ws.on("error", reject);
+      const chunks = [];
+      let size = 0;
+      res.on("data", c => {
+        chunks.push(c);
+        size += c.length;
+        if (size > 24 * 1024 * 1024) req.destroy(new Error("返回内容太大"));
+      });
+      res.on("end", () => {
+        let buf = Buffer.concat(chunks);
+        const enc = String(res.headers["content-encoding"] || "").toLowerCase();
+        try {
+          if (enc === "gzip") buf = zlib.gunzipSync(buf);
+          else if (enc === "deflate") buf = zlib.inflateSync(buf);
+          else if (enc === "br") buf = zlib.brotliDecompressSync(buf);
+        } catch { /* 解压失败就按原样用 */ }
+        resolve({ buf, type: String(res.headers["content-type"] || ""), finalUrl: u.toString() });
+      });
+      res.on("error", reject);
     });
-    req.on("timeout", () => req.destroy(new Error("下载超时")));
+    req.on("timeout", () => req.destroy(new Error("连接超时")));
     req.on("error", reject);
   });
+}
+
+/* 按文件头判断是不是真图片，返回扩展名；不是图片返回 null */
+function sniffImage(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return ".jpg";
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return ".png";
+  if (buf.slice(0, 3).toString("ascii") === "GIF") return ".gif";
+  if (buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP") return ".webp";
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return ".bmp";
+  if (buf.slice(4, 8).toString("ascii") === "ftyp") {
+    const brand = buf.slice(8, 12).toString("ascii").toLowerCase();
+    if (brand.startsWith("avi")) return ".avif";
+  }
+  return null;
+}
+
+/* 图片内容校验：太小或解不开的一律当无效（很多 CDN 用 1x1 占位图冒充成功） */
+function validateImageBuf(buf) {
+  if (!buf || buf.length < 1024) {
+    return { ok: false, reason: "拿到的图片只有 " + (buf ? buf.length : 0) + " 字节，是网站返回的占位图，不是真图" };
+  }
+  const img = nativeImage.createFromBuffer(buf);
+  if (img.isEmpty()) return { ok: false, reason: "图片解不开，格式可能不受支持" };
+  const { width, height } = img.getSize();
+  if (!width || !height) return { ok: false, reason: "图片尺寸读不出来" };
+  if (width < 80 || height < 80) {
+    return { ok: false, reason: `拿到的图只有 ${width}×${height}，是占位图` };
+  }
+  return { ok: true, width, height };
+}
+
+/* 从商品页 HTML 里挖主图地址（1688 / 乐华梅兰 / 亚马逊等通用） */
+function extractPageImage(html, pageUrl) {
+  const picks = [];
+  const push = u => {
+    if (!u) return;
+    let s = String(u).trim().replace(/&amp;/g, "&");
+    if (!s || s.startsWith("data:")) return;
+    try { s = new URL(s, pageUrl).toString(); } catch { return; }
+    if (!picks.includes(s)) picks.push(s);
+  };
+
+  const metaRules = [
+    /<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]+itemprop=["']image["'][^>]*content=["']([^"']+)["']/i,
+    /<link[^>]+rel=["']image_src["'][^>]*href=["']([^"']+)["']/i
+  ];
+  for (const re of metaRules) {
+    const m = re.exec(html);
+    if (m) push(m[1]);
+  }
+
+  // JSON 里的主图字段（1688/Amazon/LM 常见）
+  const jsonRules = [
+    /"imageUrl"\s*:\s*"([^"]+)"/i,
+    /"mainImage"\s*:\s*"([^"]+)"/i,
+    /"images?"\s*:\s*\[\s*"([^"]+)"/i,
+    /"large"\s*:\s*"([^"]+\.(?:jpe?g|png|webp))"/i,
+    /"zoom"\s*:\s*"([^"]+\.(?:jpe?g|png|webp))"/i
+  ];
+  for (const re of jsonRules) {
+    const m = re.exec(html);
+    if (m) push(m[1]);
+  }
+
+  // 兜底：直接找 CDN 上的图片地址
+  const cdnRules = [
+    /https?:\/\/cbu01\.alicdn\.com\/[^"'\s\\]+\.(?:jpe?g|png|webp)/i,
+    /https?:\/\/[^"'\s\\]*alicdn\.com\/[^"'\s\\]+\.(?:jpe?g|png|webp)/i,
+    /https?:\/\/(?:media|cdn|static)\.[^"'\s\\]*leroymerlin[^"'\s\\]+\.(?:jpe?g|png|webp)/i,
+    /https?:\/\/[^"'\s\\]+\.(?:jpe?g|png|webp)(?:\?[^"'\s\\]*)?/i
+  ];
+  for (const re of cdnRules) {
+    const m = re.exec(html);
+    if (m) push(m[0]);
+  }
+
+  return picks;
+}
+
+/* 各平台的防盗链要求不同，按域名给对应站点 Referer */
+function siteReferer(host) {
+  const h = String(host || "").toLowerCase();
+  if (/leroymerlin\.fr$/.test(h)) return "https://www.leroymerlin.fr/";
+  if (/leroymerlin\.es$/.test(h)) return "https://www.leroymerlin.es/";
+  if (/leroymerlin\.it$/.test(h)) return "https://www.leroymerlin.it/";
+  if (/leroymerlin/.test(h)) return "https://www.leroymerlin.fr/";
+  if (/manomano/.test(h)) return "https://www.manomano.fr/";
+  if (/alicdn\.com$/.test(h) || /1688\.com$/.test(h)) return "https://detail.1688.com/";
+  if (/alicdn/.test(h)) return "https://www.taobao.com/";
+  if (/amazon/.test(h) || /media-amazon/.test(h)) return "https://www.amazon.fr/";
+  return null;
+}
+
+/* 判断这个链接是不是图片直链 */
+function isDirectImageUrl(u) {
+  const s = String(u || "");
+  if (/\.(jpe?g|png|webp|gif|bmp)(\?|#|$)/i.test(s)) return true;
+  if (/\/(?:image|img|pic|photo|media|thumb)[^?]*\?/i.test(s)) return false;
+  return false;
+}
+
+/* 统一入口：给一个链接，想办法拿到一张真图片的 buffer
+   返回 { buf, ext } ；失败抛错（错误信息给用户看） */
+async function resolveImage(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  if (!url) throw new Error("链接是空的");
+  if (!/^https?:\/\//i.test(url)) throw new Error("链接要以 http:// 或 https:// 开头");
+
+  let host = "";
+  try { host = new URL(url).hostname; } catch { throw new Error("链接格式不对"); }
+
+  // Referer 轮换：站点专属 → 自己域名 → 不带 → 搜索引擎
+  const referers = [];
+  const siteRef = siteReferer(host);
+  if (siteRef) referers.push(siteRef);
+  referers.push("origin", "", "https://www.google.com/");
+
+  // 第一步：直接请求这个链接
+  let res = null, lastErr = null;
+  for (const ref of referers) {
+    const h = {};
+    if (ref === "origin") h.Referer = "https://" + host + "/";
+    else if (ref) h.Referer = ref;
+    try {
+      res = await httpGet(url, h);
+      break;
+    } catch (e) {
+      lastErr = e;
+      // 404/410 换 Referer 也没用，直接报
+      if (e.status === 404 || e.status === 410) break;
+    }
+  }
+  if (!res) {
+    const st = lastErr && lastErr.status;
+    if (st === 403 || st === 401) throw new Error("网站拒绝访问（防盗链）。改用「右键复制图片 / 截图后 Ctrl+V 粘贴」");
+    if (st === 404) throw new Error("链接打不开（404），检查一下地址对不对");
+    throw new Error((lastErr && lastErr.message) || "网络请求失败");
+  }
+
+  // 情况一：确实是图片
+  let ext = sniffImage(res.buf);
+  if (ext) {
+    if (ext === ".avif") throw new Error("网站给的是 AVIF 格式，程序存不了，换 jpg/png 的图链接");
+    const v = validateImageBuf(res.buf);
+    if (!v.ok) throw new Error(v.reason);
+    return { buf: res.buf, ext };
+  }
+
+  // 情况二：是个网页，去里面挖主图
+  const isHtml = /html/i.test(res.type) || /^\s*<(!doctype|html)/i.test(res.buf.slice(0, 200).toString("utf8"));
+  if (!isHtml) throw new Error("这个地址不是图片（是网页或下载页）。请右键商品图选「复制图片地址」");
+
+  const html = res.buf.toString("utf8");
+  const cands = extractPageImage(html, url);
+  if (!cands.length) {
+    throw new Error("商品页里找不到主图，被反爬拦了。改用「截图后 Ctrl+V 粘贴」最快");
+  }
+
+  // 逐个候选图试
+  for (const c of cands.slice(0, 6)) {
+    try {
+      const r2 = await httpGet(c, { Referer: url });
+      const e2 = sniffImage(r2.buf);
+      if (!e2 || e2 === ".avif") continue;
+      const v = validateImageBuf(r2.buf);
+      if (!v.ok) continue;
+      return { buf: r2.buf, ext: e2 };
+    } catch { /* 换下一张 */ }
+  }
+  throw new Error("页面里找到图片地址了但拉不下来（防盗链）。改用「右键复制图片 / 截图后按 Ctrl+V 粘贴」");
+}
+
+/* 下载网络图片到指定路径（保留旧签名，内部走 resolveImage） */
+async function downloadImage(url, dest) {
+  const { buf, ext } = await resolveImage(url);
+  fs.writeFileSync(dest, buf);
+  return dest;
 }
 
 /* ---------------- 表格解析 ---------------- */
@@ -380,13 +591,12 @@ ipcMain.handle("import-urls", async (e, urls) => {
     if (!url) continue;
     done++;
     const id = newId(seqRef.value);
-    const tmp = path.join(IMG_DIR, "_tmp_" + id + ".jpg");
+    let tmp = "";
     try {
-      await downloadImage(url, tmp);
-      if (!isValidImageFile(tmp)) {
-        throw new Error("下载到的不是有效图片（可能碰上了防盗链、需要登录，或链接本身不是图片）");
-      }
-      const ext = detectImageExt(tmp);
+      const got = await resolveImage(url);
+      const ext = got.ext;
+      tmp = path.join(IMG_DIR, "_tmp_" + id + ext);
+      fs.writeFileSync(tmp, got.buf);
 
       const imgName = id + ext;
       const dest = path.join(IMG_DIR, imgName);
@@ -462,7 +672,7 @@ ipcMain.handle("read-table-file", (e, p) => {
 
 /* 更换单张图片（本地文件或网络链接） */
 ipcMain.handle("replace-image", async (e, payload) => {
-  const { id, src, url } = payload || {};
+  const { id, src, url, buffer } = payload || {};
   const items = readItems();
   const it = items.find(x => x.id === id);
   if (!it) return { ok: false, error: "找不到这件商品" };
@@ -473,16 +683,23 @@ ipcMain.handle("replace-image", async (e, payload) => {
       if (!isValidImageFile(src)) return { ok: false, error: "这个文件不是有效图片，或者图片已损坏" };
       newPath = src;
       newOrig = path.basename(src);
+    } else if (buffer) {
+      // 剪贴板粘贴进来的图片
+      const buf = Buffer.from(buffer);
+      const ext = sniffImage(buf);
+      if (!ext) return { ok: false, error: "粘贴的内容不是图片" };
+      const v = validateImageBuf(buf);
+      if (!v.ok) return { ok: false, error: v.reason };
+      newPath = path.join(IMG_DIR, "_tmp_" + id + ext);
+      fs.writeFileSync(newPath, buf);
+      tmpPath = newPath;
+      newOrig = "paste_" + id + ext;
     } else if (url) {
-      tmpPath = path.join(IMG_DIR, "_tmp_" + id + ".download");
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
-      await downloadImage(url, tmpPath);
-      if (!isValidImageFile(tmpPath)) {
-        try { fs.unlinkSync(tmpPath); } catch {}
-        return { ok: false, error: "下载到的不是有效图片（可能防盗链、需要登录，或这个链接根本不是图片）" };
-      }
-      newPath = tmpPath;
-      newOrig = "url_" + id + detectImageExt(tmpPath);
+      const got = await resolveImage(url);
+      newPath = path.join(IMG_DIR, "_tmp_" + id + got.ext);
+      fs.writeFileSync(newPath, got.buf);
+      tmpPath = newPath;
+      newOrig = "url_" + id + got.ext;
     } else {
       return { ok: false, error: "缺少图片来源" };
     }
@@ -507,6 +724,86 @@ ipcMain.handle("replace-image", async (e, payload) => {
     it.thumb = makeThumb(dest, id);
     writeItems(items);
     return { ok: true, thumb: it.thumb, warn: it.thumb ? "" : "缩略图生成失败，已改用原图显示" };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/* 从剪贴板图片直接建商品（对付反爬网站：截图或右键复制图片即可） */
+ipcMain.handle("add-image-buffer", async (e, payload) => {
+  const data = payload && payload.data;
+  const hintName = String((payload && payload.name) || "").trim();
+  if (!data) return { ok: false, error: "没收到图片内容" };
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const ext = sniffImage(buf);
+  if (!ext) return { ok: false, error: "剪贴板里的不是图片" };
+  const v = validateImageBuf(buf);
+  if (!v.ok) return { ok: false, error: v.reason };
+
+  return await withDbLock(() => {
+    const items = readItems();
+    const seqRef = { value: nextSeq(items) };
+    const id = newId(seqRef.value);
+    const imgName = id + ext;
+    const dest = path.join(IMG_DIR, imgName);
+    fs.writeFileSync(dest, buf);
+    const item = {
+      id,
+      orig: "paste_" + id + ext,
+      img: imgName,
+      thumb: makeThumb(dest, id),
+      name: hintName || "",
+      sku: "",
+      cat: "",
+      url: "",
+      note: "",
+      ts: Date.now()
+    };
+    items.push(item);
+    writeItems(items);
+    return { ok: true, item };
+  });
+});
+
+/* 给已有条目按链接补图（表格导入后调用） */
+ipcMain.handle("download-one", async (e, payload) => {
+  const { id, url } = payload || {};
+  const useUrl = String(url || "").trim();
+
+  // 先把链接取出来（不长期占锁）
+  let target = useUrl;
+  if (!target) {
+    const cur = readItems().find(x => x.id === id);
+    if (!cur) return { ok: false, error: "找不到这件商品" };
+    target = String(cur.url || "").trim();
+  }
+  if (!target) return { ok: false, error: "这条没有链接" };
+  if (!/^https?:\/\//i.test(target)) return { ok: false, error: "链接要以 http 开头" };
+
+  try {
+    // 下载阶段并发安全：每张图文件名带 id + 时间戳，不会撞
+    const { buf, ext } = await resolveImage(target);
+    const imgName = id + "_" + Date.now().toString(36) + ext;
+    const dest = path.join(IMG_DIR, imgName);
+    fs.writeFileSync(dest, buf);
+    const th = makeThumb(dest, id);
+
+    // 写记录阶段加锁，避免并发互相覆盖
+    return await withDbLock(() => {
+      const items = readItems();
+      const it = items.find(x => x.id === id);
+      if (!it) return { ok: false, error: "商品已被删除" };
+      if (it.img && it.img !== imgName) {
+        const old = path.join(IMG_DIR, it.img);
+        if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch {} }
+      }
+      it.img = imgName;
+      it.url = target;
+      it.thumb = th || imgName;
+      delete it.pending;
+      writeItems(items);
+      return { ok: true, img: imgName, thumb: th };
+    });
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -542,7 +839,9 @@ ipcMain.handle("delete-item", (e, it) => {
 });
 
 /* 批量删除 */
-ipcMain.handle("delete-many", (e, ids) => {
+ipcMain.handle("delete-many", (e, ids) => withDbLock(() => _deleteMany(ids)));
+
+function _deleteMany(ids) {
   const set = new Set(Array.isArray(ids) ? ids : []);
   if (!set.size) return { ok: true, removed: 0, total: readItems().length };
   const all = readItems();
@@ -554,7 +853,7 @@ ipcMain.handle("delete-many", (e, ids) => {
   }
   writeItems(keep);
   return { ok: true, removed, total: keep.length };
-});
+}
 
 /* 生成模板表格内容（用 xlsx 写，主进程存到临时目录并返回路径） */
 ipcMain.handle("make-template", async () => {
