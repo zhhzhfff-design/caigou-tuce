@@ -38,3 +38,4 @@ _test_export/
 
 # 调试截图
 _*.png
+_t*/

@@ -140,14 +140,14 @@
             <path d="M12 15V3"></path>
           </svg>
         </span>
-        <span class="ol"><span class="ot">导出全部（含图片文件）</span><span class="od">Excel 清单 + 真实图片，打包成一个文件夹</span></span>
+        <span class="ol"><span class="ot">导出图片 + 表格（推荐）</span><span class="od">一个文件夹：清单.xlsx + images 里全是真图</span></span>
       </button>
       <button class="opt" id="optExport">
         <span class="oi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
           <path d="M12 4v12M12 16l-4-4M12 16l4-4"></path>
           <path d="M4 18v1a2 2 0 002 2h12a2 2 0 002-2v-1"></path>
         </svg></span>
-        <span class="ol"><span class="ot">导出当前清单</span><span class="od">含所有链接，可备份</span></span>
+        <span class="ol"><span class="ot">只导出表格（不含图片）</span><span class="od">就一个 xlsx，图片列是文件名和链接</span></span>
       </button>
     </div>
 
@@ -155,7 +155,10 @@
       <p><b>反爬网站（1688 / 乐华梅兰）的本事：</b>截图或右键复制商品图，回到这里按 <b>Ctrl+V</b> 直接粘进来，比填链接稳。</p>
     </div>
     <div class="hint">
-      <p><b>表格怎么填：</b>一行一个商品。第一列填<b>图片文件名</b>（比如 A001.jpg），程序会自动把图片和这一行对上；链接没填也能先导进来，之后在卡片上右键补。</p>
+      <p><b>表格不用改格式：</b>你自己的 1688 表直接导进来就行。程序认这几列——<br>
+      <b>最低售价 · 1688链接 · 照片 · 重量kg · 成本价 · 商品名称</b><br>
+      「照片」列贴图或填图片网址都行；重量写 kg（0.35），程序自动换成 350 克。<br>
+      想要一张空表照着填，点上面的<b>「下载导入模板」</b>，列名和列序跟你那张表一模一样，可以直接粘贴。</p>
     </div>
 
     <div class="footrow">
@@ -241,6 +244,10 @@
     <div class="field">
       <label>重量（克）</label>
       <input id="edWeight" placeholder="比如 590" inputmode="decimal">
+    </div>
+    <div class="field">
+      <label>规格</label>
+      <input id="edSpec" placeholder="尺寸、容量、颜色，比如 20×30cm">
     </div>
     <div class="field">
       <label>分类</label>

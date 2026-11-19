@@ -862,36 +862,66 @@ function _deleteMany(ids) {
 }
 
 /* 生成模板表格内容（用 xlsx 写，主进程存到临时目录并返回路径） */
-ipcMain.handle("make-template", async () => {
-  const header = ["图片文件名", "商品名称", "采购链接", "分类", "货号", "售价(€)", "成本(¥)", "重量(g)", "备注"];
-  const sample = [
-    ["A001.jpg", "三合一数据线 1米", "https://detail.1688.com/offer/123456789.html", "数据线", "DL-0001", "9.9", "20", "120", "供应商A"],
-    ["A002.jpg", "20W PD快充头", "https://detail.1688.com/offer/987654321.html", "充电器", "CD-0001", "15.5", "68", "590", ""]
-  ];
-  const ws = XLSX.utils.aoa_to_sheet([header, ...sample]);
-  ws["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 48 }, { wch: 12 }, { wch: 14 }, { wch: 24 }];
+/* 模板完全按用户 1688 表的结构来：列名、列序一模一样，方便直接复制粘贴 */
+const TPL_HEADER = ["最低售价", "1688链接", "照片", "重量kg", "成本价", "商品名称", "规格", "分类"];
+const TPL_COLS = [
+  { wch: 11 }, { wch: 62 }, { wch: 44 }, { wch: 9 },
+  { wch: 10 }, { wch: 40 }, { wch: 16 }, { wch: 10 }
+];
+const TPL_SAMPLE = [
+  [14.18, "https://detail.1688.com/offer/1081921567398.html", "", 0.35, 16.5, "", "", ""],
+  [19.9, "https://detail.1688.com/offer/1082171089832.html",
+   "https://media.adeo.com/mkp/af2d1604d1fbaab71c286e96d0169374/media.jpg?width=650", 0.5, 25,
+   "（上面两行是示例，填数据前删掉）", "20×30cm", "灯饰"]
+];
+
+ipcMain.handle("make-template", async (e, opts) => {
+  const ws = XLSX.utils.aoa_to_sheet([TPL_HEADER, ...TPL_SAMPLE]);
+  ws["!cols"] = TPL_COLS;
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "商品清单");
 
-  const r = await dialog.showSaveDialog(mainWin, {
-    title: "保存导入模板",
-    defaultPath: path.join(app.getPath("desktop"), "商品清单模板.xlsx"),
-    filters: [{ name: "Excel", extensions: ["xlsx"] }]
-  });
-  if (r.canceled || !r.filePath) return { ok: false };
-  XLSX.writeFile(wb, r.filePath);
-  return { ok: true, file: r.filePath };
+  // 第二页：每列怎么填
+  const guide = [
+    ["列名", "怎么填", "必填"],
+    ["最低售价", "欧洲站的最低跟卖价，填数字，单位欧元。例如 14.18", "建议填"],
+    ["1688链接", "1688 商品页地址，或者任何采购页地址。一整串粘进来就行", "必填"],
+    ["照片", "两种都可以：①直接粘贴图片（WPS 会变成嵌入图）②填图片网址", "选填"],
+    ["重量kg", "填公斤数，例如 0.35。程序会自动换算成 350 克", "建议填"],
+    ["成本价", "1688 采购价，填人民币数字。例如 16.5", "建议填"],
+    ["商品名称", "不填也行，程序会从图片描述里自动取", "选填"],
+    ["规格", "尺寸、容量、颜色之类的备注，方便自己看", "选填"],
+    ["分类", "不填也行，程序会按商品名自动归类", "选填"]
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(guide);
+  ws2["!cols"] = [{ wch: 12 }, { wch: 64 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws2, "怎么填");
+
+  let filePath = (opts && opts.targetFile) || "";
+  if (!filePath) {
+    const r = await dialog.showSaveDialog(mainWin, {
+      title: "保存导入模板",
+      defaultPath: path.join(app.getPath("desktop"), "1688商品表_模板.xlsx"),
+      filters: [{ name: "Excel", extensions: ["xlsx"] }]
+    });
+    if (r.canceled || !r.filePath) return { ok: false };
+    filePath = r.filePath;
+  }
+  XLSX.writeFile(wb, filePath);
+  return { ok: true, file: filePath };
 });
 
 /* 导出当前清单 */
-/* 导出用的统一表结构：图片链接、本地图片都要带上 */
+/* 导出表：前 8 列和用户的 1688 表同序同单位，后面追加图片与附加信息
+   注意重量列必须写 kg（内部存的是克），否则再导入会放大 1000 倍 */
 const EXPORT_HEADER = [
-  "本地图片", "图片链接", "商品名称", "1688链接", "分类", "货号",
-  "售价(€)", "成本(¥)", "重量(g)", "备注"
+  "最低售价", "1688链接", "本地图片", "重量kg", "成本价",
+  "商品名称", "规格", "分类", "图片链接", "货号", "备注"
 ];
 const EXPORT_COLS = [
-  { wch: 22 }, { wch: 46 }, { wch: 34 }, { wch: 46 }, { wch: 12 },
-  { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 22 }
+  { wch: 11 }, { wch: 58 }, { wch: 26 }, { wch: 9 }, { wch: 10 },
+  { wch: 36 }, { wch: 16 }, { wch: 10 }, { wch: 46 }, { wch: 12 }, { wch: 20 }
 ];
 
 /* 图片链接：优先记下来的原图地址，其次采购链接 */
@@ -899,39 +929,173 @@ function imageLinkOf(it) {
   return it.imgUrl || it.sourceUrl || "";
 }
 
+/* 内部重量是克，导出成 kg */
+function weightInKg(w) {
+  const n = parseFloat(w);
+  if (!isFinite(n) || n <= 0) return "";
+  const kg = n / 1000;
+  return String(+kg.toFixed(3));
+}
+
 function buildExportRow(it, imgDirName) {
   return [
-    it.img ? (imgDirName ? imgDirName + "/" + it.img : it.img) : "",
-    imageLinkOf(it),
-    it.name || "",
-    it.url || "",
-    it.cat || "",
-    it.sku || "",
     it.price || "",
+    it.url || "",
+    it.img ? (imgDirName ? imgDirName + "/" + it.img : it.img) : "",
+    weightInKg(it.weight),
     it.cost || "",
-    it.weight || "",
+    it.name || "",
+    it.spec || "",
+    it.cat || "",
+    imageLinkOf(it),
+    it.sku || "",
     it.note || ""
   ];
 }
 
-ipcMain.handle("export-list", async (e, items) => {
+/* 图片链接列做成可点击的：有网图地址就用网图，只有本地图就指向本地文件 */
+/* relPrefix 有值（导包时）就用相对路径，整个文件夹拷走链接也不会坏 */
+function linkColumn(ws, colIdx, items, relPrefix) {
+  items.forEach((it, i) => {
+    if (!it.img) return;
+    const addr = XLSX.utils.encode_cell({ c: colIdx, r: i + 1 });
+    const netUrl = it.imgUrl || it.sourceUrl || "";
+
+    // 有网图地址：直接给网址
+    if (netUrl) {
+      ws[addr] = { t: "s", v: netUrl, l: { Target: netUrl, Tooltip: "点击用浏览器打开" } };
+      return;
+    }
+    // 只有本地图：导包用相对路径，单表导出用本机绝对路径
+    const target = relPrefix
+      ? relPrefix + "/" + it.img
+      : "file:///" + path.join(IMG_DIR, it.img).replace(/\\/g, "/");
+    ws[addr] = { t: "s", v: it.img, l: { Target: target, Tooltip: "点击打开图片" } };
+  });
+}
+
+/* 1688链接列也做成可点的 */
+function linkUrlColumn(ws, colIdx, items) {
+  items.forEach((it, i) => {
+    const u = String(it.url || "").trim();
+    if (!/^https?:\/\//i.test(u)) return;
+    const addr = XLSX.utils.encode_cell({ c: colIdx, r: i + 1 });
+    ws[addr] = { t: "s", v: u, l: { Target: u, Tooltip: "点击打开采购页" } };
+  });
+}
+
+ipcMain.handle("export-list", async (e, items, opts) => {
   const body = items.map(it => buildExportRow(it, ""));
   const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...body]);
   ws["!cols"] = EXPORT_COLS;
+  linkUrlColumn(ws, 1, items);
+  linkColumn(ws, 8, items);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "商品清单");
 
-  const r = await dialog.showSaveDialog(mainWin, {
-    title: "导出商品清单",
-    defaultPath: path.join(app.getPath("desktop"), "商品清单.xlsx"),
-    filters: [{ name: "Excel", extensions: ["xlsx"] }]
-  });
-  if (r.canceled || !r.filePath) return { ok: false };
-  XLSX.writeFile(wb, r.filePath);
-  return { ok: true, file: r.filePath };
+  // 说明页
+  const info1 = [
+    ["导出时间", new Date().toLocaleString("zh-CN")],
+    ["商品数量", items.length],
+    ["", ""],
+    ["模式", "只导出表格（不含图片文件）"],
+    ["图片怎么查看", "「图片链接」列可以直接点击：有网图地址的用浏览器打开；只有本地图的指向本机文件"],
+    ["想连图片一起要", "回到程序，点「导出图片 + 表格」，会给你一个文件夹，里面 images 全是真图"]
+  ];
+  const s1 = XLSX.utils.aoa_to_sheet(info1);
+  s1["!cols"] = [{ wch: 16 }, { wch: 82 }];
+  XLSX.utils.book_append_sheet(wb, s1, "导出说明");
+
+  let filePath = (opts && opts.targetFile) || "";
+  if (!filePath) {
+    const r = await dialog.showSaveDialog(mainWin, {
+      title: "导出商品清单",
+      defaultPath: path.join(app.getPath("desktop"), "1688商品表_导出.xlsx"),
+      filters: [{ name: "Excel", extensions: ["xlsx"] }]
+    });
+    if (r.canceled || !r.filePath) return { ok: false };
+    filePath = r.filePath;
+  }
+  XLSX.writeFile(wb, filePath);
+  return { ok: true, file: filePath };
 });
 
 /* 连图片一起导出：一个文件夹，里面 清单.xlsx + images/ */
+/* 生成一个看图页：双击用浏览器打开，图和数据一屏看完 */
+function buildGalleryHtml(items) {
+  const esc = v => String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  const card = it => {
+    const kg = parseFloat(it.weight) > 0 ? (parseFloat(it.weight) / 1000).toFixed(2) + " kg" : "";
+    const img = it.img
+      ? `<img src="images/${esc(it.img)}" loading="lazy" alt="">`
+      : `<div class="noimg">无图</div>`;
+    return `<div class="c">
+      <div class="iw"><a href="${esc(it.imgUrl || "images/" + (it.img || ""))}" target="_blank">${img}</a></div>
+      <div class="body">
+        <div class="n">${esc(it.name || "未命名")}</div>
+        <div class="row">
+          ${it.price ? `<span class="p">€${esc(it.price)}</span>` : ""}
+          ${it.cost ? `<span class="cost">¥${esc(it.cost)}</span>` : ""}
+          ${kg ? `<span class="w">${kg}</span>` : ""}
+        </div>
+        ${it.spec ? `<div class="spec">${esc(it.spec)}</div>` : ""}
+        ${it.url ? `<a class="go" href="${esc(it.url)}" target="_blank">打开采购页 ↗</a>` : `<span class="go no">无采购链接</span>`}
+      </div>
+    </div>`;
+  };
+
+  const total = items.length;
+  const withImg = items.filter(x => x.img).length;
+  const stamp = new Date().toLocaleString("zh-CN");
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>看货清单 · ${total} 件</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:28px 32px 60px;background:#F3F5F9;color:#1B2230;
+  font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+h1{font-size:20px;margin:0 0 6px}
+.meta{color:#6B7280;font-size:12.5px;margin-bottom:22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+.c{background:#fff;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;
+  box-shadow:0 1px 3px rgba(16,24,40,.07),0 8px 24px rgba(16,24,40,.05)}
+.iw{aspect-ratio:1/1;display:grid;place-items:center;background:#FAFBFE;padding:10px;overflow:hidden}
+.iw img{max-width:100%;max-height:100%;object-fit:contain;transition:transform .3s}
+.c:hover .iw img{transform:scale(1.05)}
+.noimg{color:#B4BCC8;font-size:12px}
+.body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:7px;flex:1}
+.n{font-size:13px;font-weight:600;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden;min-height:38px}
+.row{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.p{font-size:15px;font-weight:700;color:#111}
+.cost{font-size:12px;color:#7A7A7A}
+.w{font-size:12px;color:#7A7A7A;background:#F1F4F9;border-radius:4px;padding:1px 6px}
+.spec{font-size:11.5px;color:#8A94A6}
+.go{font-size:12px;color:#1F3864;text-decoration:none;margin-top:auto;font-weight:600}
+.go:hover{text-decoration:underline}
+.go.no{color:#B4BCC8;font-weight:400}
+@media(prefers-color-scheme:dark){
+  body{background:#0E1116;color:#E6E9EE}
+  .c{background:#171B22}
+  .iw{background:#12161C}
+  .n{color:#E6E9EE}
+  .p{color:#fff}
+  .cost,.w{color:#98A2B3}
+  .w{background:#1F242D}
+  .spec{color:#7C8698}
+  .go{color:#7DB2FF}
+}
+</style></head><body>
+<h1>看货清单</h1>
+<div class="meta">共 ${total} 件 · 有图 ${withImg} 件 · 导出于 ${stamp}</div>
+<div class="grid">${items.map(card).join("")}</div>
+</body></html>`;
+}
+
 ipcMain.handle("export-pack", async (e, items, opts) => {
   if (!items || !items.length) return { ok: false, error: "没有商品可导出" };
 
@@ -979,6 +1143,8 @@ ipcMain.handle("export-pack", async (e, items, opts) => {
   const body = items.map(it => buildExportRow(it, "images"));
   const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...body]);
   ws["!cols"] = EXPORT_COLS;
+  linkUrlColumn(ws, 1, items);
+  linkColumn(ws, 8, items, "images");
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "商品清单");
 
@@ -989,8 +1155,10 @@ ipcMain.handle("export-pack", async (e, items, opts) => {
     ["图片数量", copied],
     ["缺失图片", missing],
     ["", ""],
-    ["说明", "images 文件夹里是真实图片，和第一列文件名一一对应"],
-    ["说明", "第二列是每张图的原始下载地址，可以直接复制到浏览器打开"]
+    ["模式", "导出图片 + 表格（图片是真文件）"],
+    ["图片在哪", "本文件夹下的 images\\ 里，文件名与「本地图片」列一一对应"],
+    ["图片链接", "「图片链接」列可点击：有网图地址的打开网图，只有本地图的打开本机文件"],
+    ["想只要链接", "回到程序点「只导出表格（不含图片）」"]
   ];
   const ws2 = XLSX.utils.aoa_to_sheet(info);
   ws2["!cols"] = [{ wch: 14 }, { wch: 60 }];
@@ -998,6 +1166,13 @@ ipcMain.handle("export-pack", async (e, items, opts) => {
 
   const xlsxPath = path.join(outRoot, "清单.xlsx");
   XLSX.writeFile(wb, xlsxPath);
+
+  // 顺手生成一个浏览器能直接看的看图页
+  try {
+    fs.writeFileSync(path.join(outRoot, "看货清单.html"), buildGalleryHtml(items), "utf8");
+  } catch (err) {
+    console.error("看图页生成失败", err.message);
+  }
 
   return {
     ok: true,

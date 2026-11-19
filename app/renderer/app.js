@@ -250,7 +250,7 @@ function applyFilter() {
     if (state.cat !== "__all__" && (it.cat || "未分类") !== state.cat) return false;
     if (!kw) return true;
     return ((it.name || "") + " " + (it.sku || "") + " " + (it.note || "") + " " +
-      (it.cat || "") + " " + (it.id || "") + " " + (it.orig || "") + " " + (it.price || "") + " " + (it.cost || "") + " " + (it.weight || ""))
+      (it.cat || "") + " " + (it.id || "") + " " + (it.orig || "") + " " + (it.price || "") + " " + (it.cost || "") + " " + (it.weight || "") + " " + (it.spec || ""))
       .toLowerCase().includes(kw);
   });
   resetRender();
@@ -388,6 +388,7 @@ const HEADER_WORDS = [
   ["cost", ["价格(¥)", "价格(元)", "采购价", "成本价", "进价", "1688价格", "成本", "人民币", "cost"]],
   ["price", ["售价", "跟卖价", "最低价", "卖价", "零售价", "price"]],
   ["weight", ["重量(G)", "重量(g)", "重量(KG)", "重量(kg)", "克重", "毛重", "重量", "weight"]],
+  ["spec", ["规格", "规格型号", "尺寸", "款式", "容量", "spec", "size"]],
   ["category", ["分类", "类目", "品类", "category", "cat"]],
   ["name", ["商品名称", "商品名", "产品名称", "名称", "品名", "title", "name"]],
   ["note", ["备注", "说明", "note", "remark", "memo"]]
@@ -458,7 +459,8 @@ async function applyTable(rows, images) {
 
     const rawImg = get(r, "img");
     let embedded = null;
-    let imgName = rawImg;
+    // 导出表里本地图片写的是 images/xxx.jpg，这里只取文件名
+    let imgName = rawImg ? String(rawImg).split(/[\\/]/).pop() : "";
     let cellImgUrl = "";   // 照片列里填的直接是图片地址
 
     // 整行扫一遍找嵌入图片标记（表格里可能没有"图片"这一列）
@@ -493,6 +495,7 @@ async function applyTable(rows, images) {
     const cost = get(r, "cost");
     let imgUrl = get(r, "imgUrl");
     if (!imgUrl && cellImgUrl) imgUrl = cellImgUrl;
+    const spec = get(r, "spec");
     let weight = get(r, "weight");
     // 如果重量列的单位是 KG，统一换算成克
     if (weight && col.weight !== undefined) {
@@ -523,6 +526,7 @@ async function applyTable(rows, images) {
       if (cost) hit.cost = cost;
       if (weight) hit.weight = weight;
       if (imgUrl) hit.imgUrl = imgUrl;
+      if (spec) hit.spec = spec;
       if (embedded && !hit.img) { hit.img = embedded.file; hit.thumb = embedded.thumb; delete hit.pending; updatedWithImg++; }
       if (!hit.name && embedded && embedded.title) hit.name = shortTitle(cleanName(embedded.title));
       touched.add(hit.id);
@@ -535,7 +539,7 @@ async function applyTable(rows, images) {
         img: embedded ? embedded.file : "",
         thumb: embedded ? embedded.thumb : "",
         name: finalName,
-        sku, url, note, price, cost, weight, imgUrl,
+        sku, url, note, price, cost, weight, imgUrl, spec,
         cat: cat || autoCategorize(finalName),
         pending: !embedded,
         ts: Date.now()
@@ -671,9 +675,10 @@ $("optExportPack").addEventListener("click", async () => {
       box.innerHTML = `
         <div class="dfl">
           <b>导出完成</b>
-          <p>文件夹里有两个东西：<br>
-          · <b>清单.xlsx</b> —— 商品信息，第一列是图片文件名，第二列是图片原始链接<br>
-          · <b>images\</b> —— ${r.copied} 张真实图片，文件名和表格一一对应</p>
+          <p>文件夹里有三样：<br>
+          · <b>看货清单.html</b> —— 双击用浏览器打开，一屏看完所有图和价格（推荐先看这个）<br>
+          · <b>清单.xlsx</b> —— 表格，图片链接列可以直接点开<br>
+          · <b>images</b> 文件夹 —— ${r.copied} 张真实图片，文件名和表格一一对应</p>
           <div class="dfitems"><div class="dfi"><span class="dfn">${esc(r.dir)}</span></div></div>
           <div class="dfbtns">
             <button class="btn" id="dfOpen">打开文件夹</button>
@@ -681,8 +686,10 @@ $("optExportPack").addEventListener("click", async () => {
           </div>
         </div>`;
       openPanel("dlFail");
+      const openDir = () => window.api.openUrl("file:///" + r.dir.replace(/\\/g, "/"));
       const ob = $("dfOpen");
-      if (ob) ob.addEventListener("click", () => window.api.openUrl("file:///" + r.dir.replace(/\\/g, "/")));
+      if (ob) ob.addEventListener("click", openDir);
+      setTimeout(openDir, 500);
     }
   } catch (err) {
     showProgress(false);
@@ -758,6 +765,7 @@ function openEdit(it) {
   $("edPrice").value = it.price || "";
   $("edCost").value = it.cost || "";
   $("edWeight").value = it.weight || "";
+  if ($("edSpec")) $("edSpec").value = it.spec || "";
   $("edCat").value = it.cat || "";
   $("edUrl").value = it.url || "";
   $("edNote").value = it.note || "";
@@ -773,6 +781,7 @@ $("edSave").addEventListener("click", async () => {
   it.price = $("edPrice").value.trim();
   it.cost = $("edCost").value.trim();
   it.weight = $("edWeight").value.trim();
+  if ($("edSpec")) it.spec = $("edSpec").value.trim();
   it.cat = $("edCat").value.trim();
   it.url = $("edUrl").value.trim();
   it.note = $("edNote").value.trim();
