@@ -39,3 +39,6 @@ _test_export/
 # 调试截图
 _*.png
 _t*/
+
+# 本地工作记录，不进仓库
+.workbuddy/
